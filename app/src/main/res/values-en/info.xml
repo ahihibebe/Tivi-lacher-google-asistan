@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="info_title">About</string>
+    <string name="info_description">Android TV home screen in Apple TV and macOS style, Vietnamese and English.</string>
+    <string name="info_url">http://facebook.com/TruongAlone</string>
+    <string name="info_open">Open Facebook</string>
+    <string name="info_close">Close</string>
+</resources>
