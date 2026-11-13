@@ -30,11 +30,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.DriveFileMove
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DriveFileMove
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Language
@@ -48,7 +49,6 @@ import androidx.compose.material.icons.filled.SettingsRemote
 import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.Checkbox
@@ -721,7 +721,7 @@ fun SecondaryDialogHost(
                 MacRow(
                     title = if (en) "Move" else "Di chuyển",
                     theme = state.theme,
-                    icon = Icons.Filled.DriveFileMove,
+                    icon = Icons.AutoMirrored.Filled.DriveFileMove,
                     iconTintBg = palette[0],
                     onFocused = vm::playMove,
                     onClick = {
@@ -926,7 +926,7 @@ private fun TimeBoardDialog(
         maxWidth = 540.dp,
         onDismiss = vm::closeDialog,
         headerActions = {
-            HeaderChipButton(Icons.Filled.VolumeUp, if (en) "Read" else "Đọc lại") {
+            HeaderChipButton(Icons.AutoMirrored.Filled.VolumeUp, if (en) "Read" else "Đọc lại") {
                 vm.speak(dialog.spokenSummary)
             }
         }
@@ -1006,7 +1006,7 @@ private fun WeatherBoardDialog(
         onDismiss = vm::closeDialog,
         headerActions = {
             if (!dialog.loading && dialog.spokenSummary.isNotEmpty()) {
-                HeaderChipButton(Icons.Filled.VolumeUp, if (en) "Read" else "Đọc lại") {
+                HeaderChipButton(Icons.AutoMirrored.Filled.VolumeUp, if (en) "Read" else "Đọc lại") {
                     vm.speak(dialog.spokenSummary)
                 }
             }
@@ -1148,7 +1148,7 @@ private fun PriceViewerDialog(
         onDismiss = vm::closeDialog,
         headerActions = {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                HeaderChipButton(Icons.Filled.VolumeUp, if (en) "Read" else "Đọc") {
+                HeaderChipButton(Icons.AutoMirrored.Filled.VolumeUp, if (en) "Read" else "Đọc") {
                     vm.speakCurrentPrices()
                 }
                 HeaderChipButton(

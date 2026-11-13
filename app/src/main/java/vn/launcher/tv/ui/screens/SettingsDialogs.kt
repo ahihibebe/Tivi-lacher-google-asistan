@@ -24,12 +24,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Input
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Input
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LiveTv
@@ -46,7 +47,6 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Tv
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -165,7 +165,7 @@ private fun SettingsMainDialog(state: LauncherUiState, vm: LauncherViewModel) {
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             QuickTile(
-                icon = Icons.Filled.Input,
+                icon = Icons.AutoMirrored.Filled.Input,
                 color = Color(0xFF0A84FF),
                 title = if (en) "Input" else "Nguồn vào",
                 subtitle = if (en) "Choose input" else "Chọn nguồn vào",
@@ -259,7 +259,7 @@ private fun SettingsMainDialog(state: LauncherUiState, vm: LauncherViewModel) {
             checked = state.display.soundOn,
             theme = state.theme,
             isEnglish = en,
-            icon = Icons.Filled.VolumeUp,
+            icon = Icons.AutoMirrored.Filled.VolumeUp,
             iconTintBg = palette[8],
             onFocused = vm::playMove,
             onToggle = { vm.toggleDisplayPref("sound") }
@@ -601,7 +601,7 @@ private fun VolumeSliderRow(state: LauncherUiState, vm: LauncherViewModel) {
             .padding(horizontal = 14.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(Icons.Filled.VolumeUp, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+        Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
         Slider(
             value = sliderVal,
             onValueChange = {
