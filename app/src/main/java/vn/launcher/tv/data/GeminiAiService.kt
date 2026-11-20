@@ -110,6 +110,20 @@ object GeminiAiService {
             )
         } catch (e: CancellationException) {
             throw e
+        } catch (e: IllegalStateException) {
+            Log.e(TAG, "FirebaseApp missing or uninitialized", e)
+            val missingConfig = e.message?.contains("FirebaseApp", ignoreCase = true) == true
+            AiResponse(
+                errorMessage = if (missingConfig) {
+                    if (isEnglish) {
+                        "Firebase is not configured in this APK build (missing app/google-services.json). Build from AI Studio or add GOOGLE_SERVICES_JSON to GitHub Secrets."
+                    } else {
+                        "Bản APK này chưa có tệp cấu hình app/google-services.json. Hãy build từ AI Studio hoặc thêm secret GOOGLE_SERVICES_JSON trên GitHub."
+                    }
+                } else {
+                    e.localizedMessage ?: "Firebase AI error."
+                }
+            )
         } catch (e: Exception) {
             Log.e(TAG, "Firebase AI generation failed", e)
             AiResponse(

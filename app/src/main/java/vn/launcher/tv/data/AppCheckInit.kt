@@ -21,7 +21,11 @@ private const val RECAPTCHA_SITE_KEY_RES = "recaptcha_site_key"
 fun configureAppCheck(context: Context, intent: Intent?) {
     try {
         if (FirebaseApp.getApps(context).isEmpty()) {
-            FirebaseApp.initializeApp(context)
+            val initialized = FirebaseApp.initializeApp(context)
+            if (initialized == null) {
+                Log.w(TAG, "FirebaseApp could not be initialized (google-services.json missing in build).")
+                return
+            }
         }
 
         if (BuildConfig.DEBUG) {
