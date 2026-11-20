@@ -57,6 +57,7 @@ import vn.launcher.tv.R
 import vn.launcher.tv.data.AdbLocal
 import vn.launcher.tv.data.AdminData
 import vn.launcher.tv.data.CrashGuard
+import vn.launcher.tv.data.GeminiAiService
 import vn.launcher.tv.data.Holidays
 import vn.launcher.tv.data.LunarCalendar
 import vn.launcher.tv.data.MediaLibrary
@@ -145,6 +146,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     private var slideFsJob: Job? = null
     private var musicProgressJob: Job? = null
     private var priceFetchJob: Job? = null
+    private var aiFetchJob: Job? = null
 
     private var priceSections: List<PriceSection> = emptyList()
     private var priceMatchedRows: List<PriceMatchRow> = emptyList()
@@ -1229,8 +1231,23 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     fun setVolume(level: Int) {
         val am = app.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
         try {
-            am.setStreamVolume(AudioManager.STREAM_MUSIC, level, 0)
-            _uiState.update { it.copy(volumeLevel = level) }
+            val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+            val clamped = level.coerceIn(0, max)
+            am.setStreamVolume(AudioManager.STREAM_MUSIC, clamped, 0)
+            _uiState.update { it.copy(volumeLevel = clamped, volumeMax = max) }
+        } catch (_: Exception) {
+        }
+    }
+
+    fun adjustVolume(delta: Int) {
+        val am = app.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
+        try {
+            val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+            val current = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+            val next = (current + delta).coerceIn(0, max)
+            am.setStreamVolume(AudioManager.STREAM_MUSIC, next, 0)
+            _uiState.update { it.copy(volumeLevel = next, volumeMax = max) }
+            playMove()
         } catch (_: Exception) {
         }
     }
@@ -2008,15 +2025,75 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
             }
         }
 
-        // General search fallback when spoken query is not an installed app, channel, or built-in command
+        // General search fallback -> smart answer from Google AI
         val primaryQuery = cands.firstOrNull { it.isNotBlank() }?.trim().orEmpty()
         if (primaryQuery.isNotEmpty()) {
-            toast(tr("Tìm kiếm: ", "Searching: ") + primaryQuery)
-            speak(tr("Đang tìm kiếm $primaryQuery", "Searching for $primaryQuery"))
-            _events.tryEmit(LauncherEvent.LaunchSearch(primaryQuery, onYouTube = false))
+            askGoogleAi(primaryQuery)
         } else {
             toast(tr("Không nghe rõ, hãy thử lại", "Did not catch that, try again"))
         }
+    }
+
+    fun askGoogleAi(query: String) {
+        val q = query.trim()
+        if (q.isEmpty()) return
+        val en = _uiState.value.isEnglish
+        aiFetchJob?.cancel()
+        _uiState.update {
+            it.copy(
+                activeDialog = ActiveDialog.AiAnswerBoard(
+                    query = q,
+                    loading = true
+                )
+            )
+        }
+        aiFetchJob = viewModelScope.launch {
+            val res = GeminiAiService.askStreaming(q, en) { partial ->
+                _uiState.update { st ->
+                    val cur = st.activeDialog
+                    if (cur is ActiveDialog.AiAnswerBoard && cur.query == q) {
+                        st.copy(
+                            activeDialog = cur.copy(
+                                answerText = partial,
+                                loading = true,
+                                errorMessage = null
+                            )
+                        )
+                    } else {
+                        st
+                    }
+                }
+            }
+            val cur = _uiState.value.activeDialog
+            if (cur is ActiveDialog.AiAnswerBoard && cur.query == q) {
+                _uiState.update {
+                    it.copy(
+                        activeDialog = cur.copy(
+                            answerText = res.answerText.ifEmpty { cur.answerText },
+                            spokenText = res.spokenText,
+                            loading = false,
+                            errorMessage = res.errorMessage
+                        )
+                    )
+                }
+                if (res.spokenText.isNotBlank()) {
+                    speak(res.spokenText)
+                }
+            }
+        }
+    }
+
+    fun openExternalSearch(query: String, onYouTube: Boolean) {
+        val q = query.trim()
+        if (q.isEmpty()) return
+        val msg = if (onYouTube) {
+            tr("Đang tìm trên YouTube: $q", "Searching YouTube for $q")
+        } else {
+            tr("Đang tìm trên Google: $q", "Searching Google for $q")
+        }
+        toast(msg)
+        speak(msg)
+        _events.tryEmit(LauncherEvent.LaunchSearch(q, onYouTube = onYouTube))
     }
 
     private fun handleSpecialVoice(raw: String, full: String): Boolean {
@@ -2038,18 +2115,17 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
             openPrice(kind = p.kind, zone = p.zone, speakOnLoad = true, spokenLocation = p.spokenLocation)
             return true
         }
+        VoiceCommand.parseAiPrompt(raw, full)?.let { aiQuery ->
+            askGoogleAi(aiQuery)
+            return true
+        }
         VoiceCommand.parseSearchIntent(raw, full)?.let { s ->
             if (s.query.isEmpty()) {
                 startSystemVoiceSearch()
+            } else if (s.onYouTube || s.explicitBrowser) {
+                openExternalSearch(s.query, onYouTube = s.onYouTube)
             } else {
-                val msg = if (s.onYouTube) {
-                    tr("Đang tìm trên YouTube: ${s.query}", "Searching YouTube for ${s.query}")
-                } else {
-                    tr("Đang tìm kiếm: ${s.query}", "Searching for ${s.query}")
-                }
-                toast(msg)
-                speak(msg)
-                _events.tryEmit(LauncherEvent.LaunchSearch(s.query, onYouTube = s.onYouTube))
+                askGoogleAi(s.query)
             }
             return true
         }
@@ -2678,10 +2754,21 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         toast(tr("Đã xóa", "Removed"))
     }
 
+    fun isVoiceKeyShortcut(keyCode: Int): Boolean {
+        val pkg = _uiState.value.keyShortcuts[keyCode]
+        return pkg == "@voice" || pkg == "@assistant"
+    }
+
     fun launchByKey(keyCode: Int): Boolean {
         val pkg = _uiState.value.keyShortcuts[keyCode] ?: return false
         if (pkg == "@voice") {
+            if (_uiState.value.slideshow.fullscreenOpen) closeFullscreenSlideshow()
             startVoiceCommand()
+            return true
+        }
+        if (pkg == "@assistant") {
+            if (_uiState.value.slideshow.fullscreenOpen) closeFullscreenSlideshow()
+            startSystemVoiceSearch()
             return true
         }
         val item = _uiState.value.allApps.firstOrNull { it.pkg == pkg } ?: return false
@@ -2692,7 +2779,8 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     fun keyName(code: Int): String = KeyEvent.keyCodeToString(code).replace("KEYCODE_", "")
 
     fun appLabelOf(pkg: String): String {
-        if (pkg == "@voice") return tr("Giọng nói (nói lệnh)", "Voice command")
+        if (pkg == "@voice") return tr("Trợ lý giọng nói (nói lệnh & Google AI)", "Voice Assistant (commands & AI)")
+        if (pkg == "@assistant") return "Google Assistant"
         return try {
             app.packageManager.getApplicationLabel(app.packageManager.getApplicationInfo(pkg, 0)).toString()
         } catch (_: Exception) {

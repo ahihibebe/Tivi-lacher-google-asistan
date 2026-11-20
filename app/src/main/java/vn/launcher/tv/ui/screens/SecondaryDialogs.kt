@@ -34,6 +34,7 @@ import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Home
@@ -54,12 +55,13 @@ import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -69,6 +71,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
@@ -76,6 +80,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.nativeKeyCode
 import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -163,25 +168,48 @@ fun SecondaryDialogHost(
 
         ActiveDialog.KeyMapMenu -> {
             MacWindowDialog(
-                title = if (en) "Key shortcuts for apps" else "Gán phím mở ứng dụng",
+                title = if (en) "Remote key shortcuts" else "Gán phím trên điều khiển",
                 theme = state.theme,
-                maxWidth = 520.dp,
+                maxWidth = 540.dp,
                 onDismiss = vm::closeDialog
             ) {
                 state.keyShortcuts.entries.forEachIndexed { idx, (code, pkg) ->
                     val kName = vm.keyName(code)
                     val aLabel = vm.appLabelOf(pkg)
+                    val isVoiceShortcut = pkg == "@voice" || pkg == "@assistant"
                     MacRow(
                         title = "$kName  →  $aLabel",
                         theme = state.theme,
-                        icon = Icons.Filled.SettingsRemote,
+                        icon = if (isVoiceShortcut) Icons.Filled.Mic else Icons.Filled.SettingsRemote,
                         iconTintBg = palette[idx % palette.size],
                         onFocused = vm::playMove,
                         onClick = { vm.openDialog(ActiveDialog.ConfirmRemoveKey(code, kName, aLabel)) }
                     )
                 }
                 MacRow(
-                    title = if (en) "+ Add key shortcut" else "+ Thêm gán phím",
+                    title = if (en) "+ Shortcut: Voice Assistant (commands & AI)" else "+ Gán phím gọi Trợ lý giọng nói (AI & lệnh)",
+                    theme = state.theme,
+                    icon = Icons.Filled.Mic,
+                    iconTintBg = palette[0],
+                    showChevron = true,
+                    onFocused = vm::playMove,
+                    onClick = {
+                        vm.openDialog(ActiveDialog.CaptureKey("@voice", vm.appLabelOf("@voice")))
+                    }
+                )
+                MacRow(
+                    title = if (en) "+ Shortcut: Google Assistant (system)" else "+ Gán phím gọi Google Assistant",
+                    theme = state.theme,
+                    icon = Icons.Filled.AutoAwesome,
+                    iconTintBg = palette[3],
+                    showChevron = true,
+                    onFocused = vm::playMove,
+                    onClick = {
+                        vm.openDialog(ActiveDialog.CaptureKey("@assistant", vm.appLabelOf("@assistant")))
+                    }
+                )
+                MacRow(
+                    title = if (en) "+ Add app shortcut" else "+ Gán phím mở ứng dụng",
                     theme = state.theme,
                     icon = Icons.Filled.Tune,
                     iconTintBg = palette[1],
@@ -194,19 +222,29 @@ fun SecondaryDialogHost(
 
         ActiveDialog.PickAppForKey -> {
             MacWindowDialog(
-                title = if (en) "Choose an app" else "Chọn ứng dụng",
+                title = if (en) "Choose target" else "Chọn mục cần gán phím",
                 theme = state.theme,
-                maxWidth = 520.dp,
+                maxWidth = 540.dp,
                 onDismiss = vm::closeDialog
             ) {
                 MacRow(
-                    title = if (en) "Open voice command" else "Mở giọng nói (nói lệnh)",
+                    title = if (en) "Voice Assistant (commands & Google AI)" else "Trợ lý giọng nói (nói lệnh & Google AI)",
                     theme = state.theme,
                     icon = Icons.Filled.Mic,
                     iconTintBg = palette[0],
                     onFocused = vm::playMove,
                     onClick = {
                         vm.openDialog(ActiveDialog.CaptureKey("@voice", vm.appLabelOf("@voice")))
+                    }
+                )
+                MacRow(
+                    title = "Google Assistant",
+                    theme = state.theme,
+                    icon = Icons.Filled.AutoAwesome,
+                    iconTintBg = palette[3],
+                    onFocused = vm::playMove,
+                    onClick = {
+                        vm.openDialog(ActiveDialog.CaptureKey("@assistant", vm.appLabelOf("@assistant")))
                     }
                 )
                 state.allApps.filter { !it.isSelf }.forEachIndexed { idx, app ->
@@ -223,8 +261,15 @@ fun SecondaryDialogHost(
         }
 
         is ActiveDialog.CaptureKey -> {
+            val captureFocus = remember { FocusRequester() }
+            LaunchedEffect(dialog.pkg) {
+                try {
+                    captureFocus.requestFocus()
+                } catch (_: Exception) {
+                }
+            }
             MacWindowDialog(
-                title = if (en) "Assign key" else "Gán phím",
+                title = if (en) "Assign remote key" else "Gán phím điều khiển",
                 theme = state.theme,
                 maxWidth = 520.dp,
                 onDismiss = vm::closeDialog
@@ -232,26 +277,31 @@ fun SecondaryDialogHost(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0x1EFFFFFF))
+                        .border(1.dp, LauncherColors.accent(state.theme), RoundedCornerShape(12.dp))
+                        .focusRequester(captureFocus)
                         .focusable()
-                        .onKeyEvent { ev ->
-                            if (ev.type != KeyEventType.KeyDown) return@onKeyEvent false
-                            if (ev.key == Key.Back) {
+                        .onPreviewKeyEvent { ev ->
+                            if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                            if (ev.key == Key.Back || ev.key == Key.Escape) {
                                 vm.closeDialog()
-                                return@onKeyEvent true
+                                return@onPreviewKeyEvent true
                             }
                             vm.assignKeyShortcut(ev.nativeKeyEvent.keyCode, dialog.pkg, dialog.label)
                             true
                         }
-                        .padding(12.dp)
+                        .padding(14.dp)
                 ) {
                     Text(
-                        text = (if (en) "Press a remote key to open " else "Bấm một phím trên remote để mở ") +
+                        text = (if (en) "Press any remote key (not D-pad/Back) to trigger:\n" else "Bấm một phím bất kỳ trên điều khiển để gọi:\n") +
                             dialog.label +
                             (if (en) "\n\n(Press Back to cancel)" else "\n\n(Bấm Back để hủy)"),
-                        color = Color(0xE6FFFFFF),
+                        color = Color(0xF0FFFFFF),
                         fontSize = 14.sp
                     )
                 }
+                Spacer(Modifier.height(10.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     MacActionButton(
                         text = if (en) "Cancel" else "Hủy",
@@ -308,7 +358,7 @@ fun SecondaryDialogHost(
             ) {
                 val items = listOf(
                     PriceKind.GOLD to if (en) "Gold & gold ring price" else "Giá vàng & vàng nhẫn",
-                    PriceKind.COFFEE to if (en) "Coffee price (giacaphe.com)" else "Giá cà phê (giacaphe.com)",
+                    PriceKind.COFFEE to if (en) "Domestic coffee price (giacaphe.com)" else "Giá cà phê nội địa (giacaphe.com)",
                     PriceKind.PEPPER to if (en) "Pepper price (giacaphe.com)" else "Giá hồ tiêu (giacaphe.com)",
                     PriceKind.FUEL to if (en) "Fuel price (zones 1 and 2)" else "Giá xăng dầu (vùng 1, vùng 2)"
                 )
@@ -368,6 +418,8 @@ fun SecondaryDialogHost(
         is ActiveDialog.TimeBoard -> TimeBoardDialog(dialog, state, vm)
 
         is ActiveDialog.WeatherBoard -> WeatherBoardDialog(dialog, state, vm)
+
+        is ActiveDialog.AiAnswerBoard -> AiAnswerBoardDialog(dialog, state, vm)
 
         ActiveDialog.MediaSettings -> {
             MacWindowDialog(
@@ -885,9 +937,9 @@ private fun VoiceListeningDialog(
 
             Text(
                 text = if (en) {
-                    "Try: \"Open YouTube\" · \"VTV1\" · \"Search ...\" · \"What time is it\" · \"Weather\" · \"Coffee price Dak Lak\" · \"Gold price\" · \"Fuel price\""
+                    "Try: \"Open YouTube\" · \"VTV1\" · \"Ask AI ...\" · \"What time is it\" · \"Weather\" · \"Coffee price Dak Lak\" · \"Gold price\" · \"Fuel price\""
                 } else {
-                    "Thử nói: \"Mở YouTube\" · \"Mở VTV1\" · \"Tìm kiếm ...\" · \"Mấy giờ rồi\" · \"Thời tiết Đắk Lắk\" · \"Giá cà phê Đắk Lắk\" · \"Giá tiêu\" · \"Giá vàng nhẫn\" · \"Giá xăng\""
+                    "Thử nói: \"Hỏi AI ...\" · \"Mở YouTube\" · \"Mở VTV1\" · \"Mấy giờ rồi\" · \"Thời tiết\" · \"Giá cà phê Đắk Lắk\" · \"Giá tiêu\" · \"Giá vàng nhẫn\" · \"Giá xăng\""
                 },
                 color = Color(0xB3FFFFFF),
                 fontSize = 12.sp,
@@ -1130,7 +1182,7 @@ private fun PriceViewerDialog(
     val en = state.isEnglish
     val title = when (dialog.kind) {
         PriceKind.GOLD -> if (en) "Gold & Gold Ring Prices" else "Bảng giá Vàng & Vàng Nhẫn"
-        PriceKind.COFFEE -> if (en) "Coffee Prices (giacaphe.com)" else "Bảng giá Cà Phê hôm nay"
+        PriceKind.COFFEE -> if (en) "Domestic Coffee Prices" else "Bảng giá Cà Phê Nội Địa"
         PriceKind.PEPPER -> if (en) "Pepper Prices (giacaphe.com)" else "Bảng giá Hồ Tiêu hôm nay"
         PriceKind.FUEL -> if (en) "Petrolimex Fuel Prices" else "Bảng giá Xăng Dầu"
     }
@@ -1242,17 +1294,33 @@ private fun PriceViewerDialog(
 
             if (!showWebMode) {
                 if (dialog.sections.isEmpty()) {
-                    Row(
-                        modifier = Modifier.align(Alignment.Center),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        CircularProgressIndicator(color = LauncherColors.accent(state.theme), modifier = Modifier.size(24.dp))
-                        Spacer(Modifier.width(12.dp))
-                        Text(
-                            text = if (en) "Loading today's price table…" else "Đang tải bảng giá cập nhật hôm nay…",
-                            color = Color(0xE6FFFFFF),
-                            fontSize = 15.sp
-                        )
+                    if (dialog.loading) {
+                        Row(
+                            modifier = Modifier.align(Alignment.Center),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            CircularProgressIndicator(color = LauncherColors.accent(state.theme), modifier = Modifier.size(24.dp))
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                text = if (en) "Loading today's price table…" else "Đang tải bảng giá cập nhật hôm nay…",
+                                color = Color(0xE6FFFFFF),
+                                fontSize = 15.sp
+                            )
+                        }
+                    } else {
+                        Column(
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .padding(20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = if (en) "Could not extract table automatically. Tap \"Web\" above or \"Reload\"." else "Chưa trích xuất được bảng tự động. Hãy bấm \"Xem web\" hoặc \"Làm mới\" ở góc trên.",
+                                color = Color(0xE6FFFFFF),
+                                fontSize = 14.sp,
+                                textAlign = TextAlign.Center
+                            )
+                        }
                     }
                 } else {
                     val tableScroll = rememberScrollState()
@@ -1420,6 +1488,139 @@ private fun PriceViewerDialog(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun AiAnswerBoardDialog(
+    dialog: ActiveDialog.AiAnswerBoard,
+    state: LauncherUiState,
+    vm: LauncherViewModel
+) {
+    val en = state.isEnglish
+    val accent = LauncherColors.accent(state.theme)
+    val scroll = rememberScrollState()
+
+    MacWindowDialog(
+        title = if (en) "Google AI Smart Search" else "Tìm kiếm thông minh · Google AI",
+        theme = state.theme,
+        maxWidth = 680.dp,
+        onDismiss = vm::closeDialog,
+        headerActions = {
+            if (!dialog.loading && dialog.spokenText.isNotEmpty()) {
+                HeaderChipButton(Icons.AutoMirrored.Filled.VolumeUp, if (en) "Read" else "Đọc lại") {
+                    vm.speak(dialog.spokenText)
+                }
+            }
+        }
+    ) {
+        // User's spoken question pill
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color(0x220A84FF))
+                .border(1.dp, accent.copy(alpha = 0.55f), RoundedCornerShape(12.dp))
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Filled.AutoAwesome, contentDescription = null, tint = accent, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = dialog.query,
+                color = Color.White,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 120.dp, max = 300.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color(0x1C000000))
+                .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(14.dp))
+                .padding(14.dp)
+        ) {
+            when {
+                dialog.loading && dialog.answerText.isBlank() -> {
+                    Row(
+                        modifier = Modifier.align(Alignment.Center),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(color = accent, modifier = Modifier.size(24.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            text = if (en) "Asking Google AI…" else "Google AI đang tìm câu trả lời…",
+                            color = Color(0xE6FFFFFF),
+                            fontSize = 15.sp
+                        )
+                    }
+                }
+                !dialog.errorMessage.isNullOrBlank() -> {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .verticalScroll(scroll)
+                    ) {
+                        Text(
+                            text = dialog.errorMessage,
+                            color = Color(0xFFFF8A80),
+                            fontSize = 14.sp,
+                            lineHeight = 21.sp
+                        )
+                    }
+                }
+                else -> {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .verticalScroll(scroll)
+                    ) {
+                        Text(
+                            text = dialog.answerText,
+                            color = Color(0xF2FFFFFF),
+                            fontSize = 15.sp,
+                            lineHeight = 23.sp
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(14.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            MacActionButton(
+                text = if (en) "Ask again" else "Hỏi tiếp",
+                color = accent,
+                onClick = vm::startVoiceCommand
+            )
+            MacActionButton(
+                text = if (en) "Search Google" else "Tìm Google",
+                color = Color(0x33FFFFFF),
+                onClick = { vm.openExternalSearch(dialog.query, onYouTube = false) }
+            )
+            MacActionButton(
+                text = "YouTube",
+                color = Color(0x55FF3B30),
+                onClick = { vm.openExternalSearch(dialog.query, onYouTube = true) }
+            )
+            MacActionButton(
+                text = if (en) "Close" else "Đóng",
+                color = Color(0x28FFFFFF),
+                onClick = vm::closeDialog
+            )
         }
     }
 }

@@ -198,6 +198,13 @@ sealed interface ActiveDialog {
         val spokenSummary: String,
         val loading: Boolean = false
     ) : ActiveDialog
+    data class AiAnswerBoard(
+        val query: String,
+        val answerText: String = "",
+        val spokenText: String = "",
+        val loading: Boolean = true,
+        val errorMessage: String? = null
+    ) : ActiveDialog
     data object DisplayMenu : ActiveDialog
     data object ChooseProvince : ActiveDialog
     data class ChooseWard(

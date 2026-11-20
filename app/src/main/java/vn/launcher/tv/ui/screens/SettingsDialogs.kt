@@ -9,12 +9,15 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -25,6 +28,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Input
+import androidx.compose.material.icons.automirrored.filled.VolumeDown
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Bluetooth
@@ -67,6 +72,12 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -294,7 +305,7 @@ private fun SettingsMainDialog(state: LauncherUiState, vm: LauncherViewModel) {
             onClick = { vm.openDialog(ActiveDialog.VoiceChannelsEdit) }
         )
         MacRow(
-            title = if (en) "Key shortcuts for apps" else "Gán phím mở ứng dụng",
+            title = if (en) "Remote key shortcuts (apps & voice)" else "Gán phím điều khiển (ứng dụng & trợ lý)",
             theme = state.theme,
             icon = Icons.Filled.SettingsRemote,
             iconTintBg = palette[6],
@@ -588,41 +599,97 @@ private fun InlineMusicSettingsCard(state: LauncherUiState, vm: LauncherViewMode
 @Composable
 private fun VolumeSliderRow(state: LauncherUiState, vm: LauncherViewModel) {
     val max = state.volumeMax.coerceAtLeast(1)
-    var sliderVal by remember(state.volumeLevel) { mutableFloatStateOf(state.volumeLevel.toFloat()) }
-    val pct = ((sliderVal / max) * 100f).roundToInt().coerceIn(0, 100)
+    val level = state.volumeLevel.coerceIn(0, max)
+    val fraction = (level.toFloat() / max.toFloat()).coerceIn(0f, 1f)
+    val pct = (fraction * 100f).roundToInt().coerceIn(0, 100)
     val shape = RoundedCornerShape(14.dp)
+    var focused by remember { mutableStateOf(false) }
+
+    LaunchedEffect(focused) { if (focused) vm.playMove() }
+
+    val volIcon = when {
+        level == 0 -> Icons.AutoMirrored.Filled.VolumeOff
+        pct < 50 -> Icons.AutoMirrored.Filled.VolumeDown
+        else -> Icons.AutoMirrored.Filled.VolumeUp
+    }
+    val accent = LauncherColors.accent(state.theme)
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp)
             .clip(shape)
-            .background(Color(0x1EFFFFFF), shape)
-            .padding(horizontal = 14.dp, vertical = 6.dp),
+            .background(if (focused) accent.copy(alpha = 0.28f) else Color(0x1EFFFFFF), shape)
+            .border(if (focused) 1.5.dp else 1.dp, if (focused) Color.White else Color(0x22FFFFFF), shape)
+            .onFocusChanged { focused = it.isFocused }
+            .onPreviewKeyEvent { ev ->
+                if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                when (ev.key) {
+                    Key.DirectionLeft -> {
+                        vm.adjustVolume(-1)
+                        true
+                    }
+                    Key.DirectionRight -> {
+                        vm.adjustVolume(1)
+                        true
+                    }
+                    else -> false
+                }
+            }
+            .focusable()
+            .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
-        Slider(
-            value = sliderVal,
-            onValueChange = {
-                sliderVal = it
-                vm.setVolume(it.roundToInt())
-            },
-            valueRange = 0f..max.toFloat(),
-            colors = SliderDefaults.colors(
-                thumbColor = Color.White,
-                activeTrackColor = LauncherColors.accent(state.theme),
-                inactiveTrackColor = Color(0x44FFFFFF)
-            ),
+        Icon(volIcon, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.width(10.dp))
+        Text(
+            text = "◀",
+            color = if (focused && level > 0) Color.White else Color(0x66FFFFFF),
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold
+        )
+        BoxWithConstraints(
             modifier = Modifier
                 .weight(1f)
                 .padding(horizontal = 10.dp)
+                .height(22.dp)
+                .pointerInput(max) {
+                    detectTapGestures { offset ->
+                        val w = size.width.coerceAtLeast(1)
+                        val ratio = (offset.x / w.toFloat()).coerceIn(0f, 1f)
+                        vm.setVolume((ratio * max).roundToInt())
+                    }
+                },
+            contentAlignment = Alignment.CenterStart
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(8.dp)
+                    .clip(CircleShape)
+                    .background(Color(0x44FFFFFF))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(fraction)
+                        .fillMaxHeight()
+                        .clip(CircleShape)
+                        .background(if (focused) Color.White else accent)
+                )
+            }
+        }
+        Text(
+            text = "▶",
+            color = if (focused && level < max) Color.White else Color(0x66FFFFFF),
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold
         )
         Text(
             text = "$pct%",
-            color = Color(0xCCFFFFFF),
+            color = if (focused) Color.White else Color(0xCCFFFFFF),
             fontSize = 12.sp,
-            modifier = Modifier.width(38.dp),
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.width(42.dp),
             textAlign = TextAlign.End
         )
     }

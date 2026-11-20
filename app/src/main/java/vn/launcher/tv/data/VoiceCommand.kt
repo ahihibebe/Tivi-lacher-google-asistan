@@ -7,7 +7,7 @@ import java.util.Locale
 /** Voice command normalization, verb stripping, digit conversion, intent parsing, and fuzzy matching. */
 object VoiceCommand {
 
-    data class SearchIntent(val query: String, val onYouTube: Boolean)
+    data class SearchIntent(val query: String, val onYouTube: Boolean, val explicitBrowser: Boolean = false)
 
     data class PriceIntent(
         val kind: PriceKind,
@@ -127,13 +127,38 @@ object VoiceCommand {
         }
     }
 
+    fun parseAiPrompt(raw: String, full: String): String? {
+        val explicitAiRegex = Regex(
+            "^(?:hoi google ai|google ai|hoi ai|tro ly ai|gemini|ai tra loi|tim kiem ai|tim bang ai|ask google ai|ask ai|ask gemini)\\s+(.+)$"
+        )
+        explicitAiRegex.matchEntire(full)?.let { m ->
+            val q = extractRawTail(raw, m.groupValues[1])
+            if (q.isNotBlank()) return q
+        }
+        val questionRegex = Regex(
+            "^(?:cho toi hoi|cho hoi|giai thich|tom tat|cach lam|lam sao|tai sao|vi sao|khi nao|o dau|bao nhieu|la gi|nhu the nao|ai la|what is|who is|why|how to|explain)\\s+(.+)$"
+        )
+        questionRegex.matchEntire(full)?.let { _ ->
+            return raw.trim()
+        }
+        return null
+    }
+
     fun parseSearchIntent(raw: String, full: String): SearchIntent? {
         val ytRegex = Regex(
             "^(?:tim kiem tren|tim tren|mo youtube tim|tim kiem youtube|youtube tim|search youtube(?: for)?|youtube)\\s+(.+)$"
         )
         ytRegex.matchEntire(full)?.let { m ->
             val q = extractRawTail(raw, m.groupValues[1])
-            return SearchIntent(q, onYouTube = true)
+            return SearchIntent(q, onYouTube = true, explicitBrowser = true)
+        }
+
+        val browserRegex = Regex(
+            "^(?:mo google tim|tim tren google|tim tren web|google search(?: for)?)\\s+(.+)$"
+        )
+        browserRegex.matchEntire(full)?.let { m ->
+            val q = extractRawTail(raw, m.groupValues[1])
+            if (q.isNotBlank()) return SearchIntent(q, onYouTube = false, explicitBrowser = true)
         }
 
         val searchRegex = Regex(
@@ -147,11 +172,11 @@ object VoiceCommand {
                 .removeSuffix(" tren youtube")
                 .trim()
             val q = if (onYt) cleaned else extractRawTail(raw, cleaned)
-            if (q.isNotBlank()) return SearchIntent(q, onYouTube = onYt)
+            if (q.isNotBlank()) return SearchIntent(q, onYouTube = onYt, explicitBrowser = onYt)
         }
 
         if (full == "tim kiem" || full == "search" || full == "google assistant" || full == "tro ly google") {
-            return SearchIntent("", onYouTube = false)
+            return SearchIntent("", onYouTube = false, explicitBrowser = true)
         }
         return null
     }

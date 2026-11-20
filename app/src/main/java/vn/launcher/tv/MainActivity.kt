@@ -29,6 +29,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import vn.launcher.tv.data.CrashGuard
+import vn.launcher.tv.data.configureAppCheck
 import vn.launcher.tv.model.ActiveDialog
 import vn.launcher.tv.ui.screens.ActiveDialogHost
 import vn.launcher.tv.ui.screens.FullscreenSlideshowDialog
@@ -110,6 +111,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         CrashGuard.install(applicationContext)
         super.onCreate(savedInstanceState)
+
+        // Configure App Check with launch intent before any UI, ViewModels, or Firebase operations
+        configureAppCheck(this, intent)
+
         enableEdgeToEdge()
 
         askLocationOnceIfNeeded()
@@ -229,13 +234,18 @@ class MainActivity : ComponentActivity() {
         val code = event.keyCode
         if (event.action == KeyEvent.ACTION_DOWN &&
             event.repeatCount == 0 &&
-            state.activeDialog !is ActiveDialog.CaptureKey &&
-            (code == KeyEvent.KEYCODE_VOICE_ASSIST ||
-                code == KeyEvent.KEYCODE_ASSIST ||
-                code == KeyEvent.KEYCODE_SEARCH)
+            state.activeDialog !is ActiveDialog.CaptureKey
         ) {
-            vm.startVoiceCommand()
-            return true
+            if (vm.isVoiceKeyShortcut(code)) {
+                return vm.launchByKey(code)
+            }
+            if (code == KeyEvent.KEYCODE_VOICE_ASSIST ||
+                code == KeyEvent.KEYCODE_ASSIST ||
+                code == KeyEvent.KEYCODE_SEARCH
+            ) {
+                vm.startVoiceCommand()
+                return true
+            }
         }
 
         if (state.activeDialog == null && !state.slideshow.fullscreenOpen) {

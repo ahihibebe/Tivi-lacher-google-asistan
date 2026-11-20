@@ -105,12 +105,16 @@ object PriceRepository {
                             mergedSections.add(sec)
                         }
                     }
-                    // For gold, keep going if we haven't seen any "nhẫn" (ring gold) rows yet
-                    val hasRingGold = mergedSections.any { s ->
-                        s.title.lowercase(Locale.ROOT).contains("nhẫn") ||
-                            s.rows.any { r -> r.any { it.lowercase(Locale.ROOT).contains("nhẫn") } }
+                    // For gold, keep going until ring gold is seen; for coffee, keep going until domestic provinces are seen
+                    val ready = when (kind) {
+                        PriceKind.GOLD -> mergedSections.any { s ->
+                            s.title.lowercase(Locale.ROOT).contains("nhẫn") ||
+                                s.rows.any { r -> r.any { it.lowercase(Locale.ROOT).contains("nhẫn") } }
+                        }
+                        PriceKind.COFFEE -> mergedSections.any { isDomesticCoffeeSection(it) }
+                        else -> true
                     }
-                    if (kind != PriceKind.GOLD || hasRingGold) break
+                    if (ready) break
                 }
             } catch (_: Exception) {
             }
@@ -221,6 +225,8 @@ object PriceRepository {
                 if (cells.size < 2) continue
                 if (allTh && headers.isEmpty()) {
                     headers.addAll(cells)
+                } else if (headers.isEmpty() && rows.isEmpty() && (1 until cells.size).none { hasDigits(cells[it]) }) {
+                    headers.addAll(cells)
                 } else {
                     if ((1 until cells.size).any { hasDigits(cells[it]) }) numericRowCount++
                     rows.add(cells)
@@ -234,8 +240,44 @@ object PriceRepository {
         return sections
     }
 
+    private fun isDomesticCoffeeSection(s: PriceSection): Boolean {
+        val text = VoiceCommand.norm(s.title) + " " +
+            s.rows.joinToString(" ") { VoiceCommand.norm(it.firstOrNull()) }
+        return text.contains("dak lak") || text.contains("lam dong") ||
+            text.contains("gia lai") || text.contains("dak nong") ||
+            text.contains("kon tum") || text.contains("tay nguyen") ||
+            text.contains("noi dia") || text.contains("trong nuoc")
+    }
+
+    private fun isWorldFuturesSection(s: PriceSection): Boolean {
+        if (isDomesticCoffeeSection(s)) return false
+        val text = VoiceCommand.norm(s.title) + " " +
+            s.rows.joinToString(" ") { VoiceCommand.norm(it.firstOrNull()) }
+        return text.contains("london") || text.contains("new york") ||
+            text.contains("robusta") || text.contains("arabica") ||
+            text.contains("the gioi") || text.contains("truc tuyen") ||
+            text.contains("ky han")
+    }
+
     private fun postProcessSections(kind: PriceKind, raw: List<PriceSection>): List<PriceSection> {
         if (raw.isEmpty()) return emptyList()
+        if (kind == PriceKind.COFFEE) {
+            val domestic = raw.filter { isDomesticCoffeeSection(it) && !isWorldFuturesSection(it) }
+                .distinctBy { it.rows.take(3) }
+                .map { sec ->
+                    val normTitle = VoiceCommand.norm(sec.title)
+                    val cleanTitle = when {
+                        sec.title.isBlank() || (!normTitle.contains("noi dia") && !normTitle.contains("trong nuoc")) ->
+                            "Bảng giá cà phê nội địa"
+                        else -> sec.title
+                    }
+                    sec.copy(title = cleanTitle)
+                }
+            if (domestic.isNotEmpty()) return domestic.take(6)
+
+            val nonWorld = raw.filterNot { isWorldFuturesSection(it) }.distinctBy { it.rows.take(3) }
+            if (nonWorld.isNotEmpty()) return nonWorld.take(6)
+        }
         if (kind == PriceKind.GOLD) {
             // Prioritize & label Vàng miếng vs Vàng nhẫn clearly
             val sorted = raw.sortedByDescending { s ->
@@ -344,7 +386,7 @@ object PriceRepository {
         } else ""
         val kindTitle = when (kind) {
             PriceKind.GOLD -> if (isEnglish) "Gold and gold ring prices" else "Giá vàng và vàng nhẫn"
-            PriceKind.COFFEE -> if (isEnglish) "Coffee prices from giacaphe.com" else "Giá cà phê từ giacaphe.com"
+            PriceKind.COFFEE -> if (isEnglish) "Domestic coffee prices from giacaphe.com" else "Bảng giá cà phê nội địa"
             PriceKind.PEPPER -> if (isEnglish) "Pepper prices from giacaphe.com" else "Giá hồ tiêu từ giacaphe.com"
             PriceKind.FUEL -> if (isEnglish) "Petrolimex fuel prices" else "Giá xăng dầu Petrolimex"
         }
