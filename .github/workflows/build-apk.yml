@@ -28,9 +28,13 @@ jobs:
           if [ ! -f app/google-services.json ] && [ -n "$GOOGLE_SERVICES_JSON" ]; then
             printf '%s' "$GOOGLE_SERVICES_JSON" > app/google-services.json
           fi
-      - name: Build APK
-        run: gradle assembleDebug --no-daemon
+      - name: Build APKs (Release & Debug)
+        run: gradle assembleRelease assembleDebug --no-daemon
       - uses: actions/upload-artifact@v6
         with:
-          name: VietLauncher-apk
+          name: VietLauncher-release-apk
+          path: app/build/outputs/apk/release/*.apk
+      - uses: actions/upload-artifact@v6
+        with:
+          name: VietLauncher-debug-apk
           path: app/build/outputs/apk/debug/*.apk

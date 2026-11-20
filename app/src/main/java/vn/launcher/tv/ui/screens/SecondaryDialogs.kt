@@ -58,6 +58,8 @@ import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -92,9 +94,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import vn.launcher.tv.data.AppCheckMode
 import vn.launcher.tv.data.CrashGuard
 import vn.launcher.tv.data.PriceRepository
 import vn.launcher.tv.data.VoiceCommand
+import vn.launcher.tv.data.currentAppCheckMode
+import vn.launcher.tv.data.generateDebugUuidCandidate
+import vn.launcher.tv.data.getActiveDebugSecret
+import vn.launcher.tv.data.getCustomDebugToken
 import vn.launcher.tv.model.ActiveDialog
 import vn.launcher.tv.model.LauncherUiState
 import vn.launcher.tv.model.PriceKind
@@ -421,6 +428,8 @@ fun SecondaryDialogHost(
         is ActiveDialog.WeatherBoard -> WeatherBoardDialog(dialog, state, vm)
 
         is ActiveDialog.AiAnswerBoard -> AiAnswerBoardDialog(dialog, state, vm)
+
+        is ActiveDialog.AppCheckConfig -> AppCheckConfigDialog(dialog, state, vm)
 
         ActiveDialog.MediaSettings -> {
             MacWindowDialog(
@@ -1650,6 +1659,13 @@ private fun AiAnswerBoardDialog(
             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            if (!dialog.errorMessage.isNullOrBlank() && dialog.isAppCheckError) {
+                MacActionButton(
+                    text = "App Check",
+                    color = Color(0x55FF9F0A),
+                    onClick = { vm.openAppCheckConfig(dialog.query) }
+                )
+            }
             MacActionButton(
                 text = if (en) "Ask again" else "Hỏi tiếp",
                 color = accent,
@@ -1664,6 +1680,105 @@ private fun AiAnswerBoardDialog(
                 text = "YouTube",
                 color = Color(0x55FF3B30),
                 onClick = { vm.openExternalSearch(dialog.query, onYouTube = true) }
+            )
+            MacActionButton(
+                text = if (en) "Close" else "Đóng",
+                color = Color(0x28FFFFFF),
+                onClick = vm::closeDialog
+            )
+        }
+    }
+}
+
+@Composable
+private fun AppCheckConfigDialog(
+    dialog: ActiveDialog.AppCheckConfig,
+    state: LauncherUiState,
+    vm: LauncherViewModel
+) {
+    val context = LocalContext.current
+    val en = state.isEnglish
+    val accent = LauncherColors.accent(state.theme)
+    val savedOrActive = remember {
+        getCustomDebugToken(context) ?: getActiveDebugSecret(context).orEmpty()
+    }
+    var tokenInput by remember { mutableStateOf(savedOrActive) }
+    val modeLabel = remember {
+        when (currentAppCheckMode()) {
+            AppCheckMode.RECAPTCHA -> "reCAPTCHA Enterprise"
+            AppCheckMode.DEBUG_INTENT -> "Debug Token (Intent)"
+            AppCheckMode.DEBUG_CUSTOM -> "Debug Token (TV)"
+            AppCheckMode.DEBUG_AUTO_UUID -> "Debug Token (Auto UUID)"
+            AppCheckMode.UNCONFIGURED -> if (en) "Unconfigured" else "Chưa cấu hình"
+        }
+    }
+
+    MacWindowDialog(
+        title = if (en) "Firebase App Check Config" else "Cấu hình Firebase App Check",
+        theme = state.theme,
+        maxWidth = 640.dp,
+        onDismiss = {
+            if (!dialog.returnQuery.isNullOrBlank()) {
+                vm.askGoogleAi(dialog.returnQuery)
+            } else {
+                vm.closeDialog()
+            }
+        }
+    ) {
+        Text(
+            text = if (en) {
+                "Package: ${context.packageName}\nCurrent mode: $modeLabel\n\n" +
+                    "On Android TV boxes without Google Play Services (or Debug APKs), register a Debug Token UUID in Firebase Console → App Check → Apps → Manage debug tokens, then enter that exact UUID below."
+            } else {
+                "Gói ứng dụng: ${context.packageName}\nChế độ hiện tại: $modeLabel\n\n" +
+                    "Trên TV Box không có Google Play Services (hoặc bản Debug APK), hãy đăng ký mã Debug Token (UUID) trong Firebase Console → App Check → Apps → Manage debug tokens rồi nhập đúng mã đó vào ô dưới."
+            },
+            color = Color(0xCCFFFFFF),
+            fontSize = 13.sp,
+            lineHeight = 19.sp
+        )
+
+        Spacer(Modifier.height(10.dp))
+
+        OutlinedTextField(
+            value = tokenInput,
+            onValueChange = { tokenInput = it },
+            label = {
+                Text(if (en) "App Check Debug Token (UUID)" else "Mã Debug Token (UUID)")
+            },
+            singleLine = true,
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White,
+                focusedBorderColor = accent,
+                unfocusedBorderColor = Color(0x44FFFFFF),
+                focusedLabelColor = accent,
+                unfocusedLabelColor = Color(0x99FFFFFF)
+            ),
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(Modifier.height(14.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            MacActionButton(
+                text = if (en) "Generate UUID" else "Tạo UUID",
+                color = Color(0x33FFFFFF),
+                onClick = { tokenInput = generateDebugUuidCandidate() }
+            )
+            MacActionButton(
+                text = if (en) "Use reCAPTCHA" else "Dùng reCAPTCHA",
+                color = Color(0x33FFFFFF),
+                onClick = { vm.saveAppCheckDebugToken(null, dialog.returnQuery) }
+            )
+            MacActionButton(
+                text = if (en) "Save & Retry" else "Lưu & Thử lại",
+                color = accent,
+                onClick = { vm.saveAppCheckDebugToken(tokenInput, dialog.returnQuery) }
             )
             MacActionButton(
                 text = if (en) "Close" else "Đóng",

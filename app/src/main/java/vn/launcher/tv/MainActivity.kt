@@ -210,6 +210,9 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        if (intent.hasExtra("FIREBASE_APPCHECK_DEBUG_TOKEN")) {
+            configureAppCheck(this, intent)
+        }
         vm.onHomePressed()
     }
 

@@ -203,8 +203,10 @@ sealed interface ActiveDialog {
         val answerText: String = "",
         val spokenText: String = "",
         val loading: Boolean = true,
-        val errorMessage: String? = null
+        val errorMessage: String? = null,
+        val isAppCheckError: Boolean = false
     ) : ActiveDialog
+    data class AppCheckConfig(val returnQuery: String?) : ActiveDialog
     data object DisplayMenu : ActiveDialog
     data object ChooseProvince : ActiveDialog
     data class ChooseWard(

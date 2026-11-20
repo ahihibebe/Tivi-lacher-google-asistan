@@ -2087,7 +2087,8 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                             answerText = res.answerText.ifEmpty { cur.answerText },
                             spokenText = res.spokenText,
                             loading = false,
-                            errorMessage = res.errorMessage
+                            errorMessage = res.errorMessage,
+                            isAppCheckError = res.isAppCheckError
                         )
                     )
                 }
@@ -2095,6 +2096,24 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                     speak(res.spokenText)
                 }
             }
+        }
+    }
+
+    fun openAppCheckConfig(returnQuery: String? = null) {
+        _uiState.update { it.copy(activeDialog = ActiveDialog.AppCheckConfig(returnQuery = returnQuery)) }
+    }
+
+    fun saveAppCheckDebugToken(token: String?, returnQuery: String? = null) {
+        vn.launcher.tv.data.saveCustomDebugTokenAndReconfigure(app, token)
+        val cleared = token.isNullOrBlank()
+        toast(
+            if (cleared) tr("Đã chuyển về App Check reCAPTCHA mặc định", "Switched back to default reCAPTCHA App Check")
+            else tr("Đã lưu App Check Debug Token", "Saved App Check Debug Token")
+        )
+        if (!returnQuery.isNullOrBlank()) {
+            askGoogleAi(returnQuery)
+        } else {
+            closeDialog()
         }
     }
 

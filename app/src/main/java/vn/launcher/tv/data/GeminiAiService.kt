@@ -58,7 +58,8 @@ object GeminiAiService {
     data class AiResponse(
         val answerText: String = "",
         val spokenText: String = "",
-        val errorMessage: String? = null
+        val errorMessage: String? = null,
+        val isAppCheckError: Boolean = false
     )
 
     suspend fun askStreaming(
@@ -138,13 +139,59 @@ object GeminiAiService {
             )
         } catch (e: Exception) {
             Log.e(TAG, "Firebase AI generation failed", e)
-            AiResponse(
-                errorMessage = e.localizedMessage?.takeIf { it.isNotBlank() } ?: if (isEnglish) {
-                    "Could not connect to Google AI."
-                } else {
-                    "Không nhận được phản hồi từ Google AI."
+            val rawMsg = e.localizedMessage?.takeIf { it.isNotBlank() }
+            val appCheckRelated = rawMsg != null && (
+                rawMsg.contains("App Check", ignoreCase = true) ||
+                    rawMsg.contains("AppCheck", ignoreCase = true) ||
+                    rawMsg.contains("attestation", ignoreCase = true) ||
+                    rawMsg.contains("token is invalid", ignoreCase = true) ||
+                    rawMsg.contains("403")
+                )
+            if (appCheckRelated) {
+                val sdkDetail = diagnoseAppCheckTokenError(context)
+                val mode = currentAppCheckMode()
+                val modeLabel = when (mode) {
+                    AppCheckMode.RECAPTCHA -> "reCAPTCHA Enterprise"
+                    AppCheckMode.DEBUG_INTENT -> "Debug Token (Intent)"
+                    AppCheckMode.DEBUG_CUSTOM -> "Debug Token (TV)"
+                    AppCheckMode.DEBUG_AUTO_UUID -> "Debug Token (Auto UUID)"
+                    AppCheckMode.UNCONFIGURED -> if (isEnglish) "Unconfigured" else "Chưa cấu hình"
                 }
-            )
+                val activeSecret = getActiveDebugSecret(context)
+                val builtMsg = buildString {
+                    append(rawMsg)
+                    append("\n\n")
+                    append(if (isEnglish) "App Check mode: $modeLabel" else "Chế độ App Check: $modeLabel")
+                    if (!sdkDetail.isNullOrBlank() && !sdkDetail.equals(rawMsg, ignoreCase = true)) {
+                        append("\n")
+                        append(if (isEnglish) "Detail: $sdkDetail" else "Chi tiết: $sdkDetail")
+                    }
+                    if (!activeSecret.isNullOrBlank() && mode != AppCheckMode.RECAPTCHA) {
+                        append("\n")
+                        append(
+                            if (isEnglish) "TV Debug Token: $activeSecret"
+                            else "Mã Debug Token trên TV: $activeSecret"
+                        )
+                    }
+                    append("\n")
+                    append(
+                        if (isEnglish) {
+                            "If this TV box lacks Google Play Services or reCAPTCHA fails, press \"App Check\" below to enter a registered Firebase App Check Debug Token."
+                        } else {
+                            "Nếu TV không có Google Play Services hoặc chưa đăng ký Debug Token, bấm nút \"App Check\" bên dưới để xem/nhập mã Debug Token từ Firebase Console."
+                        }
+                    )
+                }
+                AiResponse(errorMessage = builtMsg, isAppCheckError = true)
+            } else {
+                AiResponse(
+                    errorMessage = rawMsg ?: if (isEnglish) {
+                        "Could not connect to Google AI."
+                    } else {
+                        "Không nhận được phản hồi từ Google AI."
+                    }
+                )
+            }
         }
     }
 
