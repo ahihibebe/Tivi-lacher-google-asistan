@@ -1,7 +1,9 @@
 package vn.launcher.tv.data
 
+import android.content.Context
 import android.util.Log
 import com.google.firebase.Firebase
+import com.google.firebase.FirebaseApp
 import com.google.firebase.ai.ai
 import com.google.firebase.ai.type.content
 import com.google.firebase.ai.type.generationConfig
@@ -60,6 +62,7 @@ object GeminiAiService {
     )
 
     suspend fun askStreaming(
+        context: Context,
         query: String,
         isEnglish: Boolean,
         onPartialText: (String) -> Unit
@@ -71,10 +74,19 @@ object GeminiAiService {
             )
         }
 
-        val activeModel = if (isEnglish) enModel else viModel
         val accumulated = StringBuilder()
 
         return try {
+            if (FirebaseApp.getApps(context).isEmpty() && FirebaseApp.initializeApp(context) == null) {
+                return AiResponse(
+                    errorMessage = if (isEnglish) {
+                        "Firebase is not configured in this APK build (missing app/google-services.json). Build from AI Studio or add GOOGLE_SERVICES_JSON to GitHub Secrets."
+                    } else {
+                        "Bản APK này chưa có tệp cấu hình app/google-services.json. Hãy build từ AI Studio hoặc thêm secret GOOGLE_SERVICES_JSON trên GitHub."
+                    }
+                )
+            }
+            val activeModel = if (isEnglish) enModel else viModel
             withTimeout(60_000L) {
                 activeModel.generateContentStream(cleanQuery).collect { chunk ->
                     val piece = chunk.text.orEmpty()

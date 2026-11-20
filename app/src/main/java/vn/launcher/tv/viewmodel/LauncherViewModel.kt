@@ -2048,7 +2048,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
             )
         }
         aiFetchJob = viewModelScope.launch {
-            val res = GeminiAiService.askStreaming(q, en) { partial ->
+            val res = GeminiAiService.askStreaming(app, q, en) { partial ->
                 _uiState.update { st ->
                     val cur = st.activeDialog
                     if (cur is ActiveDialog.AiAnswerBoard && cur.query == q) {
