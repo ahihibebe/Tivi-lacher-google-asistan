@@ -2,6 +2,7 @@ package vn.launcher.tv.ui.screens
 
 import android.annotation.SuppressLint
 import android.view.KeyEvent as AndroidKeyEvent
+import android.webkit.CookieManager
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.animation.core.RepeatMode
@@ -1194,9 +1195,9 @@ private fun PriceViewerDialog(
     }
     val h = (LocalConfiguration.current.screenHeightDp * 0.68f).dp
     var showWebMode by remember(dialog.kind) { mutableStateOf(false) }
-    var webLoading by remember(dialog.url) { mutableStateOf(true) }
+    var webLoading by remember(dialog.kind) { mutableStateOf(true) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
-    var tries by remember(dialog.url) { mutableIntStateOf(0) }
+    var tries by remember(dialog.kind) { mutableIntStateOf(0) }
 
     MacWindowDialog(
         title = title,
@@ -1270,19 +1271,26 @@ private fun PriceViewerDialog(
                         settings.domStorageEnabled = true
                         settings.loadWithOverviewMode = true
                         settings.useWideViewPort = true
+                        settings.userAgentString = "Mozilla/5.0 (Linux; Android 13; TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+                        CookieManager.getInstance().setAcceptCookie(true)
+                        CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
                         isFocusable = showWebMode
+                        isFocusableInTouchMode = showWebMode
                         tag = dialog.url
                         webViewClient = object : WebViewClient() {
                             override fun onPageFinished(view: WebView, url: String?) {
                                 webLoading = false
+                                val scheduledTag = view.tag
                                 fun extractLater(delayMs: Long) {
                                     view.postDelayed({
+                                        if (view.tag != scheduledTag) return@postDelayed
                                         view.evaluateJavascript(PriceRepository.EXTRACT_ALL_TABLES_JS) { value ->
-                                            val ok = vm.onPriceJsonExtracted(value ?: "", dialog.speakOnLoad)
+                                            if (view.tag != scheduledTag) return@evaluateJavascript
+                                            val ok = vm.onPriceJsonExtracted(value ?: "", dialog.speakOnLoad, url)
                                             if (!ok) {
                                                 if (tries < 2) {
                                                     tries++
-                                                    extractLater(2200L)
+                                                    extractLater(1500L)
                                                 } else {
                                                     vm.onPriceExtractionFailed()
                                                 }
@@ -1290,7 +1298,7 @@ private fun PriceViewerDialog(
                                         }
                                     }, delayMs)
                                 }
-                                extractLater(1200L)
+                                extractLater(1000L)
                             }
                         }
                         loadUrl(dialog.url)
@@ -1299,6 +1307,7 @@ private fun PriceViewerDialog(
                 },
                 update = { view ->
                     view.isFocusable = showWebMode
+                    view.isFocusableInTouchMode = showWebMode
                     if (view.tag != dialog.url) {
                         view.tag = dialog.url
                         tries = 0
@@ -1460,17 +1469,32 @@ private fun PriceViewerDialog(
                                 sec.rows.forEachIndexed { rIdx, row ->
                                     val isHighlight = (dialog.kind == PriceKind.GOLD && VoiceCommand.norm(row.firstOrNull()).contains("nhan")) ||
                                         dialog.matchedRows.any { it.area.equals(row.firstOrNull(), ignoreCase = true) }
+                                    var rowFocused by remember(sec.title, rIdx, row) { mutableStateOf(false) }
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
+                                            .clip(RoundedCornerShape(8.dp))
                                             .background(
                                                 when {
+                                                    rowFocused -> LauncherColors.accent(state.theme).copy(alpha = 0.32f)
                                                     isHighlight -> Color(0x26FFD60A)
                                                     rIdx % 2 == 1 -> Color(0x0CFFFFFF)
                                                     else -> Color.Transparent
                                                 }
                                             )
-                                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                                            .then(
+                                                if (rowFocused) {
+                                                    Modifier.border(1.5.dp, Color.White, RoundedCornerShape(8.dp))
+                                                } else {
+                                                    Modifier
+                                                }
+                                            )
+                                            .onFocusChanged {
+                                                rowFocused = it.isFocused
+                                                if (it.isFocused) vm.playMove()
+                                            }
+                                            .clickable { vm.speakPriceRow(row) }
+                                            .padding(horizontal = 8.dp, vertical = 7.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         row.take(4).forEachIndexed { cIdx, cell ->
@@ -1482,7 +1506,7 @@ private fun PriceViewerDialog(
                                                     else -> Color(0xFF64D2FF)
                                                 },
                                                 fontSize = 13.sp,
-                                                fontWeight = if (cIdx == 0 || isHighlight) FontWeight.SemiBold else FontWeight.Medium,
+                                                fontWeight = if (cIdx == 0 || isHighlight || rowFocused) FontWeight.SemiBold else FontWeight.Medium,
                                                 maxLines = 2,
                                                 overflow = TextOverflow.Ellipsis,
                                                 textAlign = if (cIdx == 0) TextAlign.Start else TextAlign.End,

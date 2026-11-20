@@ -25,9 +25,38 @@ object PriceRepository {
     val EXTRACT_ALL_TABLES_JS: String = """
         (function(){
           function clean(s){return (s||'').replace(/\s+/g,' ').trim();}
+          function pseudoNum(el,p){
+            try{
+              var c=getComputedStyle(el,p).content;
+              if(c&&c!=='none'&&c!=='normal'){
+                c=c.replace(/^["']|["']$/g,'').trim();
+                if(/\d/.test(c)&&c.length<=32) return c;
+              }
+            }catch(e){}
+            return '';
+          }
+          function txt(el){
+            if(!el) return '';
+            var direct=clean(el.innerText||el.textContent||'');
+            if(/\d/.test(direct)) return direct;
+            var acc=[];
+            var eb=pseudoNum(el,'::before'); if(eb) acc.push(eb);
+            var nodes=el.querySelectorAll('*');
+            for(var k=0;k<nodes.length;k++){
+              var b=pseudoNum(nodes[k],'::before'); if(b) acc.push(b);
+              var a=pseudoNum(nodes[k],'::after'); if(a) acc.push(a);
+            }
+            var ea=pseudoNum(el,'::after'); if(ea) acc.push(ea);
+            if(acc.length>0) return clean(acc.join(' ')+(direct?' '+direct:''));
+            return direct;
+          }
           function isProvinceLike(s){
             var t=clean(s).toLowerCase();
-            return /đắk lắk|dak lak|lâm đồng|lam dong|gia lai|đắk nông|dak nong|kon tum|đồng nai|dong nai|tây nguyên|nội địa|trong nước|hồ chí minh|tp\.?\s*hcm/.test(t);
+            return /đắk lắk|dak lak|lâm đồng|lam dong|gia lai|đắk nông|dak nong|kon tum|đồng nai|dong nai|bình phước|binh phuoc|hồ chí minh|tp\.?\s*hcm/.test(t);
+          }
+          function isDomesticTerm(s){
+            var t=clean(s).toLowerCase();
+            return /đắk lắk|dak lak|lâm đồng|lam dong|gia lai|đắk nông|dak nong|kon tum|đồng nai|dong nai|bình phước|binh phuoc|hồ chí minh|tp\.?\s*hcm|buôn ma thuột|buon ma thuot|buôn hồ|cư m'?gar|ea h'?leo|krông|cư kuin|bảo lộc|di linh|lâm hà|đà lạt|đức trọng|đơn dương|pleiku|chư sê|chư prông|ia grai|gia nghĩa|đắk mil|đắk song|đắk r'?lấp|tuy đức|cư jút|đắk hà|trung bình/.test(t);
           }
           function findHeading(el){
             var cur=el;
@@ -35,7 +64,7 @@ object PriceRepository {
               var prev=cur.previousElementSibling;
               while(prev){
                 if(/^(H[1-4]|CAPTION|STRONG|P|DIV)$/i.test(prev.tagName)){
-                  var t=clean(prev.innerText);
+                  var t=txt(prev);
                   if(t.length>=4&&t.length<=90) return t;
                 }
                 prev=prev.previousElementSibling;
@@ -44,89 +73,151 @@ object PriceRepository {
             }
             return '';
           }
+          var docs=[document];
+          var iframes=document.querySelectorAll('iframe');
+          for(var f=0;f<iframes.length;f++){
+            try{if(iframes[f].contentDocument) docs.push(iframes[f].contentDocument);}catch(e){}
+          }
           var out=[];
-          var tables=document.querySelectorAll('table');
-          for(var i=0;i<tables.length&&out.length<24;i++){
-            var t=tables[i];
-            var rows=t.querySelectorAll('tr');
-            var headers=[];
-            var body=[];
-            var numRows=0;
-            var curGroup='';
-            for(var r=0;r<rows.length&&body.length<80;r++){
-              var tr=rows[r];
-              var ths=tr.querySelectorAll('th');
-              var tds=tr.querySelectorAll('td');
-              if(ths.length>=2&&tds.length===0&&headers.length===0){
-                for(var c=0;c<ths.length;c++) headers.push(clean(ths[c].innerText));
-              } else {
-                var cells=tr.querySelectorAll('th,td');
-                var row=[];
-                var hasNum=false;
-                for(var c=0;c<cells.length;c++){
-                  var v=clean(cells[c].innerText);
-                  if(c>0&&/\d{2,}/.test(v)) hasNum=true;
-                  row.push(v);
-                }
-                if(row.length===1&&row[0].length>=2&&row[0].length<=50&&!/\d{2,}/.test(row[0])){
-                  if(isProvinceLike(row[0])) curGroup=row[0];
-                  continue;
-                }
-                if(row.length>=2){
-                  if(headers.length===0&&body.length===0&&!hasNum){
-                    headers=row;
-                  } else {
-                    if(curGroup&&row[0]&&row[0].toLowerCase().indexOf(curGroup.toLowerCase())===-1&&!isProvinceLike(row[0])){
-                      row[0]=row[0]+' ('+curGroup+')';
+          for(var d=0;d<docs.length;d++){
+            var doc=docs[d];
+            var tables=doc.querySelectorAll('table');
+            for(var i=0;i<tables.length&&out.length<48;i++){
+              var t=tables[i];
+              var rows=t.querySelectorAll('tr');
+              var headers=[];
+              var body=[];
+              var numRows=0;
+              var curGroup='';
+              for(var r=0;r<rows.length&&body.length<80;r++){
+                var tr=rows[r];
+                var ths=tr.querySelectorAll('th');
+                var tds=tr.querySelectorAll('td');
+                if(ths.length>=2&&tds.length===0&&headers.length===0){
+                  for(var c=0;c<ths.length;c++) headers.push(txt(ths[c]));
+                } else {
+                  var cells=tr.querySelectorAll('th,td');
+                  var row=[];
+                  var hasNum=false;
+                  for(var c=0;c<cells.length;c++){
+                    row.push(txt(cells[c]));
+                  }
+                  if(row.length>=3&&(row[0]===''||/^\d{1,2}\.?$/.test(row[0]))&&!/^\d+$/.test(row[1])){
+                    row.shift();
+                  }
+                  for(var c=1;c<row.length;c++){
+                    if(/\d{2,}/.test(row[c])) hasNum=true;
+                  }
+                  if(row.length===1&&row[0].length>=2&&row[0].length<=50&&!/\d{2,}/.test(row[0])){
+                    if(isProvinceLike(row[0])) curGroup=row[0];
+                    continue;
+                  }
+                  if(row.length>=2){
+                    if(headers.length===0&&body.length===0&&!hasNum){
+                      headers=row;
+                    } else {
+                      if(curGroup&&row[0]&&row[0].toLowerCase().indexOf(curGroup.toLowerCase())===-1&&!isProvinceLike(row[0])){
+                        row[0]=row[0]+' ('+curGroup+')';
+                      }
+                      if(hasNum) numRows++;
+                      body.push(row);
                     }
-                    if(hasNum) numRows++;
-                    body.push(row);
                   }
                 }
               }
-            }
-            if(numRows>=1&&body.length>=1){
-              var cap=t.querySelector('caption');
-              var title=cap?clean(cap.innerText):findHeading(t);
-              out.push({title:title,headers:headers,rows:body});
-            }
-          }
-          // Fallback: scan div/ul price lists if no domestic table or extra regional div blocks exist
-          var listContainers=document.querySelectorAll('ul,ol,div,section');
-          for(var lc=0;lc<listContainers.length&&out.length<28;lc++){
-            var box=listContainers[lc];
-            if(box.closest('table')) continue;
-            var children=box.children;
-            if(!children||children.length<3||children.length>35) continue;
-            var listRows=[];
-            for(var ch=0;ch<children.length;ch++){
-              var item=children[ch];
-              if(item.querySelector('table')) continue;
-              var parts=[];
-              var sub=item.children;
-              if(sub&&sub.length>=2&&sub.length<=5){
-                for(var s=0;s<sub.length;s++){
-                  var sv=clean(sub[s].innerText);
-                  if(sv) parts.push(sv);
-                }
-              } else {
-                var rawTxt=clean(item.innerText);
-                var pm=rawTxt.match(/^([^\d]{3,42}?)\s+(\d{2,3}(?:[.,]\d{3})+)(?:\s+([+\-]?\d[\d.,]*))?/);
-                if(pm){
-                  parts.push(clean(pm[1]));
-                  parts.push(pm[2]);
-                  if(pm[3]) parts.push(pm[3]);
-                }
-              }
-              if(parts.length>=2&&parts[0].length>=2&&parts[0].length<=48&&!/^\d/.test(parts[0])&&/\d{2,3}[.,]\d{3}/.test(parts.slice(1).join(' '))){
-                listRows.push(parts);
+              if(numRows>=1&&body.length>=1){
+                var cap=t.querySelector('caption');
+                var title=cap?txt(cap):findHeading(t);
+                out.push({title:title,headers:headers,rows:body});
               }
             }
-            if(listRows.length>=2){
-              out.push({title:findHeading(box),headers:[],rows:listRows});
+            // Fallback: scan div/ul price lists if tables missed card/flex layouts
+            var listContainers=doc.querySelectorAll('ul,ol,div,section');
+            for(var lc=0;lc<listContainers.length&&out.length<80;lc++){
+              var box=listContainers[lc];
+              if(box.closest&&box.closest('table')) continue;
+              var children=box.children;
+              if(!children||children.length<2||children.length>40) continue;
+              var listRows=[];
+              for(var ch=0;ch<children.length;ch++){
+                var item=children[ch];
+                if(item.querySelector('table')) continue;
+                var parts=[];
+                var sub=item.children;
+                if(sub&&sub.length>=2&&sub.length<=6){
+                  for(var s=0;s<sub.length;s++){
+                    var sv=txt(sub[s]);
+                    if(sv) parts.push(sv);
+                  }
+                  if(parts.length>=3&&(parts[0]===''||/^\d{1,2}\.?$/.test(parts[0]))) parts.shift();
+                } else {
+                  var rawTxt=txt(item);
+                  var pm=rawTxt.match(/^([^\d]{2,48}?)\s+(\d{2,3}(?:[.,]\d{1,3})+)(?:\s*(?:đ|₫|vnđ|vnd)(?:\/kg)?)?(?:\s+([+\-]?\d[\d.,]*))?/i);
+                  if(pm){
+                    parts.push(clean(pm[1]).replace(/[:\-]+$/,'').trim());
+                    parts.push(pm[2]);
+                    if(pm[3]) parts.push(pm[3]);
+                  }
+                }
+                var tailStr=parts.slice(1).join(' ');
+                if(parts.length>=2&&parts[0].length>=2&&parts[0].length<=48&&!/^\d/.test(parts[0])&&(/\d{2,3}[.,]\d{1,3}/.test(tailStr)||/\b\d{5,6}\b/.test(tailStr))){
+                  listRows.push(parts);
+                }
+              }
+              if(listRows.length>=2){
+                out.push({title:findHeading(box),headers:[],rows:listRows});
+              }
+            }
+            // Rendered text fallback specifically for Vietnamese domestic coffee regions/districts (strict clean area labels only)
+            function isCleanDomLabel(s){
+              var t=clean(s);
+              if(t.length<3||t.length>34) return false;
+              var openP=(t.match(/\(/g)||[]).length, closeP=(t.match(/\)/g)||[]).length;
+              if(openP!==closeP) return false;
+              if(/được|ghi nhận|ở mức|dao động|giao dịch|hôm nay|hôm qua|so với|khoảng|quanh|triệu|tấn|kỳ hạn|như sau|khảo sát|trước đó|thị trường/i.test(t)) return false;
+              if(t.split(/\s+/).length>5) return false;
+              return isDomesticTerm(t);
+            }
+            if(doc.body){
+              var rawText=(doc.body.innerText||doc.body.textContent||'');
+              var lines=rawText.split(/\r?\n+/).map(clean).filter(function(x){return x.length>=2;});
+              var domRows=[];
+              var seenArea={};
+              var inlineRe=/^([^\d]{2,36}?)\s+(\d{2,3}[.,]\d{3})(?:\s*(?:đ|₫|vnđ|vnd)(?:\/kg)?)?(?:\s+([+\-]?\d[\d.,]*))?$/i;
+              var priceLineRe=/^(\d{2,3}[.,]\d{3})(?:\s*(?:đ|₫|vnđ|vnd)(?:\/kg)?)?(?:\s+([+\-]?\d[\d.,]*))?$/i;
+              for(var li=0;li<lines.length;li++){
+                var ln=lines[li];
+                var m1=ln.match(inlineRe);
+                if(m1){
+                  var area=clean(m1[1]).replace(/[:\-]+$/,'').trim();
+                  if(isCleanDomLabel(area)&&!seenArea[area.toLowerCase()]){
+                    seenArea[area.toLowerCase()]=true;
+                    var r=[area,m1[2]];
+                    if(m1[3]) r.push(m1[3]);
+                    domRows.push(r);
+                    continue;
+                  }
+                }
+                if(ln.length<=34&&!/\d{2,}/.test(ln)&&isCleanDomLabel(ln)&&!seenArea[ln.toLowerCase()]){
+                  for(var ahead=1;ahead<=2&&li+ahead<lines.length;ahead++){
+                    var m2=lines[li+ahead].match(priceLineRe);
+                    if(m2){
+                      seenArea[ln.toLowerCase()]=true;
+                      var r2=[ln,m2[1]];
+                      if(m2[2]) r2.push(m2[2]);
+                      domRows.push(r2);
+                      li+=ahead;
+                      break;
+                    }
+                  }
+                }
+              }
+              if(domRows.length>=3){
+                out.push({title:'Bảng giá cà phê nội địa',headers:['Khu vực','Giá (VNĐ/kg)'],rows:domRows});
+              }
             }
           }
-          var text=(document.body&&document.body.innerText)?document.body.innerText:'';
+          var text=txt(document.body);
           var m=text.match(/\b(\d{1,2}[\/\-]\d{1,2}[\/\-]20\d{2})\b/);
           return JSON.stringify({date:m?m[1]:'',sections:out});
         })()
@@ -169,8 +260,8 @@ object PriceRepository {
                         PriceKind.COFFEE -> {
                             val domesticCount = mergedSections
                                 .filter { isDomesticCoffeeSection(it) && !isWorldFuturesSection(it) }
-                                .sumOf { it.rows.size }
-                            domesticCount >= 6
+                                .sumOf { sec -> sec.rows.count { isValidDomesticCoffeeRow(it) } }
+                            domesticCount >= 4
                         }
                         else -> true
                     }
@@ -225,13 +316,17 @@ object PriceRepository {
         if (primaryUrl.isNotBlank()) list.add(primaryUrl.trim())
         when (kind) {
             PriceKind.COFFEE -> {
-                addIfAbsent(list, "https://giacaphe.com/")
                 addIfAbsent(list, "https://giacaphe.com/gia-ca-phe-noi-dia/")
                 addIfAbsent(list, "https://giacaphe.com/gia-ca-phe-hom-nay/")
+                addIfAbsent(list, "https://giacaphe.com/")
+                addIfAbsent(list, "https://webgia.com/gia-ca-phe/")
+                addIfAbsent(list, "https://webgia.com/gia-ca-phe/trong-nuoc/")
+                addIfAbsent(list, "https://chocaphe.vn/gia-ca-phe-hom-nay/")
             }
             PriceKind.PEPPER -> {
                 addIfAbsent(list, "https://giacaphe.com/gia-tieu-hom-nay/")
                 addIfAbsent(list, "https://giacaphe.com/gia-tieu/")
+                addIfAbsent(list, "https://webgia.com/gia-tieu/")
             }
             PriceKind.GOLD -> {
                 addIfAbsent(list, "https://webgia.com/gia-vang/sjc/")
@@ -264,7 +359,7 @@ object PriceRepository {
         val sections = ArrayList<PriceSection>()
         val tableMatcher = Regex("<table[^>]*>(.*?)</table>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
         val trMatcher = Regex("<tr[^>]*>(.*?)</tr>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
-        val cellMatcher = Regex("<(th|td)[^>]*>(.*?)</\\1>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+        val cellMatcher = Regex("<(th|td)[^>]*>(.*?)(?:</\\1>|(?=<th|<td|</tr|$))", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
         val headingMatcher = Regex("<(h[1-4]|caption)[^>]*>(.*?)</\\1>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
 
         for (tm in tableMatcher.findAll(html)) {
@@ -291,12 +386,17 @@ object PriceRepository {
                     continue
                 }
                 if (cells.size < 2) continue
-                if (allTh && headers.isEmpty()) {
-                    headers.addAll(cells)
-                } else if (headers.isEmpty() && rows.isEmpty() && (1 until cells.size).none { hasDigits(cells[it]) }) {
-                    headers.addAll(cells)
+                val normalizedCells = if (cells.size >= 3 && (cells[0].isBlank() || cells[0].trim('.').all { it.isDigit() } && cells[0].length <= 3)) {
+                    cells.drop(1)
                 } else {
-                    val rowCells = cells.toMutableList()
+                    cells
+                }
+                if (allTh && headers.isEmpty()) {
+                    headers.addAll(normalizedCells)
+                } else if (headers.isEmpty() && rows.isEmpty() && (1 until normalizedCells.size).none { hasDigits(normalizedCells[it]) }) {
+                    headers.addAll(normalizedCells)
+                } else {
+                    val rowCells = normalizedCells.toMutableList()
                     if (currentGroup.isNotEmpty() && rowCells[0].isNotBlank()) {
                         val areaNorm = VoiceCommand.norm(rowCells[0])
                         val grpNorm = VoiceCommand.norm(currentGroup)
@@ -326,25 +426,53 @@ object PriceRepository {
             .replace("&nbsp;", " ")
             .replace("&amp;", "&")
         val rowRegex = Regex(
-            "^\\s*([\\p{L}][\\p{L}0-9 .,'’\\-/]{2,42}?)\\s+(\\d{2,3}[.,]\\d{3}(?:\\s*(?:đ|₫|vnđ|vnd)(?:/kg)?)?)(?:\\s+([+\\-]?\\d[\\d.,]*))?\\s*$",
+            "^\\s*([\\p{L}][\\p{L}0-9 .,'’\\-/()]{2,36}?)\\s+(\\d{2,3}[.,]\\d{3}(?:\\s*(?:đ|₫|vnđ|vnd)(?:/kg)?)?)(?:\\s+([+\\-]?\\d[\\d.,]*))?\\s*$",
             RegexOption.IGNORE_CASE
         )
+        val priceOnlyRegex = Regex("^(\\d{2,3}[.,]\\d{3}(?:\\s*(?:đ|₫|vnđ|vnd)(?:/kg)?)?)(?:\\s+([+\\-]?\\d[\\d.,]*))?\\s*$", RegexOption.IGNORE_CASE)
+        val lines = text.lines().map { it.replace(Regex("\\s+"), " ").trim() }.filter { it.isNotEmpty() }
         val rows = ArrayList<List<String>>()
         val seenAreas = HashSet<String>()
-        for (line in text.lines()) {
-            val cleaned = line.replace(Regex("\\s+"), " ").trim()
-            if (cleaned.length !in 8..80) continue
-            val m = rowRegex.matchEntire(cleaned) ?: continue
-            val area = m.groupValues[1].trim()
-            val normArea = VoiceCommand.norm(area)
-            if (!isDomesticCoffeeName(normArea)) continue
-            val price = m.groupValues[2].trim()
-            val delta = m.groupValues[3].trim()
-            if (seenAreas.add(normArea)) {
-                rows.add(if (delta.isNotEmpty()) listOf(area, price, delta) else listOf(area, price))
+        var i = 0
+        while (i < lines.size) {
+            val cleaned = lines[i]
+            val m = if (cleaned.length in 8..72) rowRegex.matchEntire(cleaned) else null
+            if (m != null) {
+                val area = m.groupValues[1].trim().trimEnd(':', '-')
+                val normArea = VoiceCommand.norm(area)
+                if (isCleanCoffeeAreaLabel(area, normArea) && seenAreas.add(normArea)) {
+                    val price = m.groupValues[2].trim()
+                    val delta = m.groupValues[3].trim()
+                    rows.add(if (delta.isNotEmpty()) listOf(area, price, delta) else listOf(area, price))
+                }
+                i++
+                continue
             }
+            if (cleaned.length in 3..34 && !hasDigits(cleaned)) {
+                val normArea = VoiceCommand.norm(cleaned)
+                if (isCleanCoffeeAreaLabel(cleaned, normArea) && !seenAreas.contains(normArea)) {
+                    var matchedStep = 0
+                    for (ahead in 1..2) {
+                        if (i + ahead >= lines.size) break
+                        val pm = priceOnlyRegex.matchEntire(lines[i + ahead])
+                        if (pm != null && seenAreas.add(normArea)) {
+                            val price = pm.groupValues[1].trim()
+                            val delta = pm.groupValues[2].trim()
+                            rows.add(if (delta.isNotEmpty()) listOf(cleaned, price, delta) else listOf(cleaned, price))
+                            matchedStep = ahead + 1
+                            break
+                        }
+                    }
+                    if (matchedStep > 0) {
+                        i += matchedStep
+                        continue
+                    }
+                }
+            }
+            i++
         }
-        return if (rows.size >= 2) {
+        val nonAvgCount = rows.count { !VoiceCommand.norm(it[0]).contains("trung binh") }
+        return if (rows.size >= 3 && nonAvgCount >= 2) {
             listOf(PriceSection(title = "Bảng giá cà phê nội địa", headers = listOf("Khu vực", "Giá (VNĐ/kg)"), rows = rows))
         } else {
             emptyList()
@@ -375,53 +503,104 @@ object PriceRepository {
             normText.contains("dak song") || compact.contains("dakrlap") ||
             normText.contains("tuy duc") || normText.contains("dak ha") ||
             normText.contains("dong nai") || normText.contains("binh phuoc") ||
+            normText.contains("cu jut") || normText.contains("dak to") ||
+            normText.contains("duc co") || normText.contains("mang yang") ||
+            normText.contains("chu pah") || normText.contains("bu dang") ||
+            normText.contains("phuoc long") || normText.contains("dinh quan") ||
+            normText.contains("xuan loc") || normText.contains("cam my") ||
             normText.contains("trung binh") || normText.contains("ho chi minh") ||
             normText.contains("tp hcm")
     }
 
-    private fun isDomesticCoffeeSection(s: PriceSection): Boolean {
-        val text = VoiceCommand.norm(s.title) + " " +
-            s.rows.joinToString(" ") { VoiceCommand.norm(it.firstOrNull()) }
-        return isDomesticCoffeeName(text)
+    private fun isCleanCoffeeAreaLabel(rawArea: String, normArea: String = VoiceCommand.norm(rawArea)): Boolean {
+        val trimmed = rawArea.trim()
+        if (trimmed.length !in 3..38) return false
+        if (trimmed.count { it == '(' } != trimmed.count { it == ')' }) return false
+        if (trimmed.split(Regex("\\s+")).size > 6) return false
+        val proseReject = listOf(
+            "duoc", "ghi nhan", "o muc", "dao dong", "giao dich",
+            "hom nay", "hom qua", "so voi", "khoang", "quanh",
+            "trieu", "ky han", "nhu sau", "khao sat", "truoc do", "thi truong"
+        )
+        if (proseReject.any { normArea.contains(it) }) return false
+        return isDomesticCoffeeName(normArea)
+    }
+
+    private fun isValidDomesticCoffeeRow(row: List<String>): Boolean {
+        if (row.size < 2) return false
+        val hasPrice = (1 until row.size).any { hasDigits(row[it]) }
+        if (!hasPrice) return false
+        val areaRaw = row.firstOrNull().orEmpty()
+        return isCleanCoffeeAreaLabel(areaRaw) && !isNonCoffeeTickerRow(row)
+    }
+
+    private fun isNonCoffeeTickerRow(row: List<String>): Boolean {
+        val text = VoiceCommand.norm(row.firstOrNull())
+        return text.contains("london") || text.contains("new york") ||
+            text.contains("robusta") || text.contains("arabica") ||
+            text.contains("usd vnd") || text.contains("ty gia") ||
+            text.contains("ho tieu") || text.contains("brazil") ||
+            text.contains("b3 ")
+    }
+
+    fun isDomesticCoffeeSection(s: PriceSection): Boolean {
+        val valid = s.rows.filter { isValidDomesticCoffeeRow(it) }
+        if (valid.size < 3) {
+            val distinctProvinces = valid
+                .map { VoiceCommand.norm(it.firstOrNull()) }
+                .filter { !it.contains("trung binh") }
+                .distinct()
+            return valid.size >= 2 && distinctProvinces.size >= 2
+        }
+        return true
     }
 
     private fun isWorldFuturesSection(s: PriceSection): Boolean {
         if (isDomesticCoffeeSection(s)) return false
         val text = VoiceCommand.norm(s.title) + " " +
-            s.rows.joinToString(" ") { VoiceCommand.norm(it.firstOrNull()) }
+            s.headers.joinToString(" ") { VoiceCommand.norm(it) } + " " +
+            s.rows.joinToString(" ") { r -> r.joinToString(" ") { VoiceCommand.norm(it) } }
         return text.contains("london") || text.contains("new york") ||
             text.contains("robusta") || text.contains("arabica") ||
             text.contains("the gioi") || text.contains("truc tuyen") ||
-            text.contains("ky han")
+            text.contains("ky han") || text.contains("brazil") ||
+            text.contains("b3") || text.contains("ice ")
     }
 
     private fun postProcessSections(kind: PriceKind, raw: List<PriceSection>): List<PriceSection> {
         if (raw.isEmpty()) return emptyList()
         if (kind == PriceKind.COFFEE) {
-            val domesticRaw = raw
-                .filter { isDomesticCoffeeSection(it) && !isWorldFuturesSection(it) }
+            val cleanedDomestic = raw
+                .filter { isDomesticCoffeeSection(it) }
+                .mapNotNull { sec ->
+                    val validRows = sec.rows.filter { r ->
+                        r.size >= 2 && (1 until r.size).any { hasDigits(r[it]) } && !isNonCoffeeTickerRow(r)
+                    }
+                    if (validRows.count { isValidDomesticCoffeeRow(it) } >= 2) {
+                        sec.copy(
+                            title = sec.title.trim().ifEmpty { "Bảng giá cà phê nội địa" },
+                            rows = validRows
+                        )
+                    } else {
+                        null
+                    }
+                }
                 .sortedByDescending { it.rows.size }
                 .distinctBy { it.rows }
 
             // Drop smaller strict subsets when a fuller table already contains the exact same rows
             val filtered = ArrayList<PriceSection>()
-            for (sec in domesticRaw) {
+            for (sec in cleanedDomestic) {
                 val isSubset = filtered.any { larger ->
                     larger.rows.size > sec.rows.size && sec.rows.all { r -> larger.rows.contains(r) }
                 }
                 if (!isSubset) filtered.add(sec)
             }
 
-            val domestic = filtered.map { sec ->
-                val cleanTitle = sec.title.trim().ifEmpty { "Bảng giá cà phê nội địa" }
-                sec.copy(title = cleanTitle)
-            }
-            if (domestic.isNotEmpty()) return domestic.take(8)
+            if (filtered.isNotEmpty()) return filtered.take(8)
 
-            val nonWorld = raw.filterNot { isWorldFuturesSection(it) }
-                .sortedByDescending { it.rows.size }
-                .distinctBy { it.rows }
-            if (nonWorld.isNotEmpty()) return nonWorld.take(8)
+            // Reject world-futures-only or empty-cell ticker payloads so fallback loads real domestic prices
+            return emptyList()
         }
         if (kind == PriceKind.GOLD) {
             // Prioritize & label Vàng miếng vs Vàng nhẫn clearly
@@ -686,8 +865,8 @@ object PriceRepository {
         while (redirects < 4) {
             val conn = (URL(current).openConnection() as HttpURLConnection).apply {
                 instanceFollowRedirects = false
-                connectTimeout = 10000
-                readTimeout = 12000
+                connectTimeout = 4000
+                readTimeout = 5000
                 setRequestProperty(
                     "User-Agent",
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"

@@ -2627,38 +2627,53 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                 if (cur is ActiveDialog.PriceViewer && cur.kind == kind) {
                     currentSpokenLocation = displayLoc
                     currentResolvedProvince = resolvedProv
-                    priceSections = result.sections
-                    priceMatchedRows = matched
-                    priceUpdatedDate = result.updatedDate
+                    if (result.sections.isNotEmpty()) {
+                        priceSections = result.sections
+                        priceMatchedRows = matched
+                        priceUpdatedDate = result.updatedDate
 
-                    _uiState.update {
-                        it.copy(
-                            activeDialog = cur.copy(
-                                spokenLocation = displayLoc,
-                                resolvedProvince = resolvedProv,
-                                updatedDate = result.updatedDate,
-                                sourceLabel = result.sourceLabel.ifEmpty { cur.sourceLabel },
-                                sections = result.sections,
-                                matchedRows = matched,
-                                loading = result.sections.isEmpty(),
-                                errorMessage = null
+                        _uiState.update {
+                            it.copy(
+                                activeDialog = cur.copy(
+                                    spokenLocation = displayLoc,
+                                    resolvedProvince = resolvedProv,
+                                    updatedDate = result.updatedDate,
+                                    sourceLabel = result.sourceLabel.ifEmpty { cur.sourceLabel },
+                                    sections = result.sections,
+                                    matchedRows = matched,
+                                    loading = false,
+                                    errorMessage = null
+                                )
                             )
-                        )
-                    }
-                    if (result.sections.isNotEmpty() && speakOnLoad && !priceSpokenForOpen) {
-                        priceSpokenForOpen = true
-                        speak(
-                            PriceRepository.summarizeForSpeech(
-                                kind = kind,
-                                zone = currentPriceZone,
-                                sections = result.sections,
-                                matchedRows = matched,
-                                spokenLocation = displayLoc,
-                                resolvedProvince = resolvedProv,
-                                updatedDate = result.updatedDate,
-                                isEnglish = _uiState.value.isEnglish
+                        }
+                        if (speakOnLoad && !priceSpokenForOpen) {
+                            priceSpokenForOpen = true
+                            speak(
+                                PriceRepository.summarizeForSpeech(
+                                    kind = kind,
+                                    zone = currentPriceZone,
+                                    sections = result.sections,
+                                    matchedRows = matched,
+                                    spokenLocation = displayLoc,
+                                    resolvedProvince = resolvedProv,
+                                    updatedDate = result.updatedDate,
+                                    isEnglish = _uiState.value.isEnglish
+                                )
                             )
-                        )
+                        }
+                    } else if (cur.sections.isNotEmpty()) {
+                        val refreshedMatch = PriceRepository.findMatchedRows(cur.sections, displayLoc ?: spokenLocation, resolvedProv)
+                        priceMatchedRows = refreshedMatch
+                        _uiState.update {
+                            it.copy(
+                                activeDialog = cur.copy(
+                                    spokenLocation = displayLoc,
+                                    resolvedProvince = resolvedProv,
+                                    matchedRows = refreshedMatch,
+                                    loading = false
+                                )
+                            )
+                        }
                     }
                 }
             }
@@ -2676,13 +2691,30 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         _uiState.update { it.copy(priceUrls = PriceKind.entries.associateWith { k -> priceUrl(k) }) }
     }
 
-    fun onPriceJsonExtracted(jsonValue: String, speakOnLoad: Boolean): Boolean {
+    fun onPriceJsonExtracted(jsonValue: String, speakOnLoad: Boolean, extractedFromUrl: String? = null): Boolean {
         val parsed = PriceRepository.parseJsonPayload(currentPriceKind, jsonValue) ?: return false
         if (parsed.sections.isEmpty()) return false
+        val currentViewer = _uiState.value.activeDialog as? ActiveDialog.PriceViewer
+        if (currentPriceKind == PriceKind.COFFEE && currentViewer != null) {
+            val curDomCount = currentViewer.sections
+                .filter { PriceRepository.isDomesticCoffeeSection(it) }
+                .sumOf { it.rows.size }
+            val newDomCount = parsed.sections
+                .filter { PriceRepository.isDomesticCoffeeSection(it) }
+                .sumOf { it.rows.size }
+            if (curDomCount > 0 && newDomCount < curDomCount) {
+                return false
+            }
+        }
         val matched = PriceRepository.findMatchedRows(parsed.sections, currentSpokenLocation, currentResolvedProvince)
         priceSections = parsed.sections
         priceMatchedRows = matched
         priceUpdatedDate = parsed.updatedDate
+        val host = try {
+            if (!extractedFromUrl.isNullOrBlank()) java.net.URL(extractedFromUrl).host.removePrefix("www.") else ""
+        } catch (_: Exception) {
+            ""
+        }
 
         _uiState.update { st ->
             val cur = st.activeDialog as? ActiveDialog.PriceViewer ?: return@update st
@@ -2691,6 +2723,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                     sections = parsed.sections,
                     matchedRows = matched,
                     updatedDate = parsed.updatedDate,
+                    sourceLabel = host.ifEmpty { cur.sourceLabel },
                     loading = false,
                     errorMessage = null
                 )
@@ -2717,8 +2750,18 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     fun onPriceExtractionFailed() {
         _uiState.update { st ->
             val cur = st.activeDialog as? ActiveDialog.PriceViewer ?: return@update st
-            if (cur.sections.isNotEmpty()) return@update st
             st.copy(activeDialog = cur.copy(loading = false))
+        }
+    }
+
+    fun speakPriceRow(row: List<String>) {
+        if (row.isEmpty()) return
+        val area = row[0].trim()
+        val vals = row.drop(1).filter { it.isNotBlank() }.joinToString(", ")
+        if (area.isNotEmpty() && vals.isNotEmpty()) {
+            speak("$area: $vals")
+        } else if (area.isNotEmpty()) {
+            speak(area)
         }
     }
 
