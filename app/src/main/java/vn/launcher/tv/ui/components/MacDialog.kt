@@ -3,7 +3,7 @@ package vn.launcher.tv.ui.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -44,6 +44,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -105,7 +106,7 @@ fun MacWindowDialog(
                             .size(12.dp)
                             .clip(CircleShape)
                             .background(Color(0xFFFF5F57))
-                            .clickable { onDismiss() }
+                            .pointerInput(Unit) { detectTapGestures { onDismiss() } }
                     )
                     Box(
                         modifier = Modifier
@@ -199,7 +200,6 @@ fun MacRow(
                 shape = shape
             )
             .onFocusChanged { focused = it.isFocused }
-            .focusable(interactionSource = interactionSource)
             .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -286,7 +286,6 @@ fun MacToggleRow(
                 shape = shape
             )
             .onFocusChanged { focused = it.isFocused }
-            .focusable(interactionSource = interactionSource)
             .clickable(interactionSource = interactionSource, indication = null, onClick = onToggle)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -360,7 +359,6 @@ fun MacActionButton(
                 shape = shape
             )
             .onFocusChanged { focused = it.isFocused }
-            .focusable(interactionSource = interactionSource)
             .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
             .padding(horizontal = 18.dp, vertical = 9.dp),
         contentAlignment = Alignment.Center

@@ -234,6 +234,8 @@ object VoiceCommand {
         var tail = anchorRegex.replace(full, "")
         tail = tail
             .replace(Regex("\\b(?:hom nay|hien tai|moi nhat|cap nhat|theo ngay|giacaphe com|giacaphe|la bao nhieu|bao nhieu|nhu the nao|o dau|today|now)\\b"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
             .replace(Regex("^(?:o|tai|khu vuc|vung|cua|cho|in|at|for)\\s+"), "")
             .replace(Regex("\\s+(?:hom nay|hien tai|moi nhat)$"), "")
             .replace(Regex("\\s+"), " ")

@@ -221,7 +221,7 @@ private fun SettingsMainDialog(state: LauncherUiState, vm: LauncherViewModel) {
                 icon = Icons.Filled.PowerSettingsNew,
                 color = Color(0xFFFF453A),
                 title = if (en) "Turn off" else "Tắt TV",
-                subtitle = if (en) "Go to standby" else "Chuyển chế độ chờ",
+                subtitle = if (en) "Power off TV" else "Tắt hẳn TV",
                 theme = state.theme,
                 modifier = Modifier.weight(1f),
                 onFocused = vm::playMove,
@@ -417,7 +417,6 @@ private fun ProfileHeaderRow(
             .clip(RoundedCornerShape(14.dp))
             .background(if (focused) LauncherColors.accent(state.theme) else Color.Transparent)
             .onFocusChanged { focused = it.isFocused }
-            .focusable()
             .clickable(onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -486,7 +485,6 @@ private fun QuickTile(
             .background(if (focused) LauncherColors.accent(theme) else Color(0x1EFFFFFF), shape)
             .border(1.dp, if (focused) Color.White else Color(0x22FFFFFF), shape)
             .onFocusChanged { focused = it.isFocused }
-            .focusable()
             .clickable(onClick = onClick)
             .padding(horizontal = 6.dp, vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -535,7 +533,6 @@ private fun InlineMusicSettingsCard(state: LauncherUiState, vm: LauncherViewMode
             .background(if (focused) LauncherColors.accent(state.theme) else Color(0x1EFFFFFF), shape)
             .border(1.dp, if (focused) Color.White else Color(0x22FFFFFF), shape)
             .onFocusChanged { focused = it.isFocused }
-            .focusable()
             .clickable {
                 vm.playSelect()
                 vm.openMusicPanel()

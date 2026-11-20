@@ -494,10 +494,18 @@ fun SecondaryDialogHost(
             ) {
                 dialog.albums.forEach { album ->
                     val checked = selected.contains(album.id)
+                    var rowFocused by remember { mutableStateOf(false) }
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(10.dp))
+                            .background(if (rowFocused) LauncherColors.accent(state.theme).copy(alpha = 0.65f) else Color.Transparent)
+                            .border(
+                                width = if (rowFocused) 1.dp else 0.dp,
+                                color = if (rowFocused) Color.White else Color.Transparent,
+                                shape = RoundedCornerShape(10.dp)
+                            )
+                            .onFocusChanged { rowFocused = it.isFocused }
                             .clickable {
                                 if (checked) selected.remove(album.id) else selected.add(album.id)
                             }
@@ -506,9 +514,7 @@ fun SecondaryDialogHost(
                     ) {
                         Checkbox(
                             checked = checked,
-                            onCheckedChange = {
-                                if (it) selected.add(album.id) else selected.remove(album.id)
-                            },
+                            onCheckedChange = null,
                             colors = CheckboxDefaults.colors(
                                 checkedColor = LauncherColors.accent(state.theme),
                                 uncheckedColor = Color(0x99FFFFFF),
@@ -753,8 +759,8 @@ fun SecondaryDialogHost(
                 onDismiss = vm::closeDialog
             ) {
                 Text(
-                    text = if (en) "The TV will go to standby. Local ADB must be enabled."
-                    else "TV sẽ chuyển sang chế độ chờ. Cần bật ADB nội bộ.",
+                    text = if (en) "The TV will shut down completely (not standby). Local ADB must be enabled."
+                    else "TV sẽ tắt nguồn hoàn toàn (không ở chế độ chờ). Cần bật ADB nội bộ.",
                     color = Color(0xE6FFFFFF),
                     fontSize = 14.sp,
                     modifier = Modifier.padding(8.dp)
@@ -1254,9 +1260,9 @@ private fun PriceViewerDialog(
                 .fillMaxWidth()
                 .height(h)
                 .clip(RoundedCornerShape(12.dp))
-                .background(if (showWebMode) Color.White else Color(0x18FFFFFF))
+                .background(if (showWebMode) Color.White else Color(0xFF1A1D24))
         ) {
-            // Embedded WebView stays attached when loading tables or when user toggles Web mode
+            // Keep WebView full-sized behind the table layer when hidden so responsive CSS/JS tables render properly
             AndroidView(
                 factory = { ctx ->
                     WebView(ctx).apply {
@@ -1265,6 +1271,7 @@ private fun PriceViewerDialog(
                         settings.loadWithOverviewMode = true
                         settings.useWideViewPort = true
                         isFocusable = showWebMode
+                        tag = dialog.url
                         webViewClient = object : WebViewClient() {
                             override fun onPageFinished(view: WebView, url: String?) {
                                 webLoading = false
@@ -1272,14 +1279,18 @@ private fun PriceViewerDialog(
                                     view.postDelayed({
                                         view.evaluateJavascript(PriceRepository.EXTRACT_ALL_TABLES_JS) { value ->
                                             val ok = vm.onPriceJsonExtracted(value ?: "", dialog.speakOnLoad)
-                                            if (!ok && tries < 2) {
-                                                tries++
-                                                extractLater(2500L)
+                                            if (!ok) {
+                                                if (tries < 2) {
+                                                    tries++
+                                                    extractLater(2200L)
+                                                } else {
+                                                    vm.onPriceExtractionFailed()
+                                                }
                                             }
                                         }
                                     }, delayMs)
                                 }
-                                extractLater(1500L)
+                                extractLater(1200L)
                             }
                         }
                         loadUrl(dialog.url)
@@ -1288,49 +1299,62 @@ private fun PriceViewerDialog(
                 },
                 update = { view ->
                     view.isFocusable = showWebMode
+                    if (view.tag != dialog.url) {
+                        view.tag = dialog.url
+                        tries = 0
+                        webLoading = true
+                        view.loadUrl(dialog.url)
+                    }
                 },
-                modifier = if (showWebMode) Modifier.fillMaxSize() else Modifier.size(1.dp).alpha(0f)
+                modifier = Modifier
+                    .fillMaxSize()
+                    .alpha(if (showWebMode) 1f else 0f)
             )
 
             if (!showWebMode) {
-                if (dialog.sections.isEmpty()) {
-                    if (dialog.loading) {
-                        Row(
-                            modifier = Modifier.align(Alignment.Center),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            CircularProgressIndicator(color = LauncherColors.accent(state.theme), modifier = Modifier.size(24.dp))
-                            Spacer(Modifier.width(12.dp))
-                            Text(
-                                text = if (en) "Loading today's price table…" else "Đang tải bảng giá cập nhật hôm nay…",
-                                color = Color(0xE6FFFFFF),
-                                fontSize = 15.sp
-                            )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0xFF1A1D24))
+                ) {
+                    if (dialog.sections.isEmpty()) {
+                        if (dialog.loading) {
+                            Row(
+                                modifier = Modifier.align(Alignment.Center),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                CircularProgressIndicator(color = LauncherColors.accent(state.theme), modifier = Modifier.size(24.dp))
+                                Spacer(Modifier.width(12.dp))
+                                Text(
+                                    text = if (en) "Loading today's price table…" else "Đang tải bảng giá cập nhật hôm nay…",
+                                    color = Color(0xE6FFFFFF),
+                                    fontSize = 15.sp
+                                )
+                            }
+                        } else {
+                            Column(
+                                modifier = Modifier
+                                    .align(Alignment.Center)
+                                    .padding(20.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = if (en) "Could not extract table automatically. Tap \"Web\" above or \"Reload\"." else "Chưa trích xuất được bảng tự động. Hãy bấm \"Xem web\" hoặc \"Làm mới\" ở góc trên.",
+                                    color = Color(0xE6FFFFFF),
+                                    fontSize = 14.sp,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
                         }
                     } else {
+                        val tableScroll = rememberScrollState()
                         Column(
                             modifier = Modifier
-                                .align(Alignment.Center)
-                                .padding(20.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
+                                .fillMaxSize()
+                                .verticalScroll(tableScroll)
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            Text(
-                                text = if (en) "Could not extract table automatically. Tap \"Web\" above or \"Reload\"." else "Chưa trích xuất được bảng tự động. Hãy bấm \"Xem web\" hoặc \"Làm mới\" ở góc trên.",
-                                color = Color(0xE6FFFFFF),
-                                fontSize = 14.sp,
-                                textAlign = TextAlign.Center
-                            )
-                        }
-                    }
-                } else {
-                    val tableScroll = rememberScrollState()
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(tableScroll)
-                            .padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
                         // Highlight spoken province / commune at top
                         if (!dialog.spokenLocation.isNullOrBlank()) {
                             Column(
@@ -1473,6 +1497,7 @@ private fun PriceViewerDialog(
                             }
                         }
                     }
+                }
                 }
             } else if (webLoading) {
                 Row(

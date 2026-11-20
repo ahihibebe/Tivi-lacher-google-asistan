@@ -13,11 +13,11 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -122,10 +122,11 @@ fun LedFocusTile(
     val ringModifier = if (showOuterRing) {
         Modifier
             .background(
-                brush = Brush.verticalGradient(listOf(Color(0x24FFFFFF), Color(0x10FFFFFF))),
+                brush = Brush.verticalGradient(listOf(Color(0x2AFFFFFF), Color(0x12FFFFFF))),
                 shape = RoundedCornerShape(cornerRadius + 4.dp)
             )
-            .border(1.dp, Color(0x2EFFFFFF), RoundedCornerShape(cornerRadius + 4.dp))
+            .border(1.dp, Color(0x48FFFFFF), RoundedCornerShape(cornerRadius + 4.dp))
+            .padding(4.dp)
     } else {
         Modifier
     }
@@ -161,7 +162,6 @@ fun LedFocusTile(
                 shape = shape
             )
             .onFocusChanged { isFocused = it.isFocused }
-            .focusable(interactionSource = interactionSource)
             .combinedClickable(
                 interactionSource = interactionSource,
                 indication = null,
@@ -218,7 +218,6 @@ fun GlassPill(
                 shape = shape
             )
             .onFocusChanged { isFocused = it.isFocused }
-            .focusable(interactionSource = interactionSource)
             .combinedClickable(
                 interactionSource = interactionSource,
                 indication = null,

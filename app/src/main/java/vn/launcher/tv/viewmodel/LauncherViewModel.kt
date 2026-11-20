@@ -180,6 +180,14 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     }
 
     private fun loadInitialPrefs(safeMode: Boolean) {
+        if (prefs.getInt("priceUrlVer", 0) < 1) {
+            val savedCoffee = prefs.getString("urlCoffee", null)?.trim()
+            val edit = prefs.edit().putInt("priceUrlVer", 1)
+            if (savedCoffee == "https://giacaphe.com/gia-ca-phe-noi-dia/") {
+                edit.remove("urlCoffee")
+            }
+            edit.apply()
+        }
         val lang = prefs.getString("lang", "vi") ?: "vi"
         val theme = LauncherTheme.fromId(prefs.getInt("theme", 0))
         val am = app.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
@@ -1438,9 +1446,16 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
 
     fun powerOff() {
         closeDialog()
-        adbRun("input keyevent 223") { _, err ->
+        toast(tr("Đang tắt nguồn TV…", "Shutting down TV…"))
+        val shutdownCmd = "(svc power shutdown 2>/dev/null) || (reboot -p 2>/dev/null) || (setprop sys.powerctl shutdown 2>/dev/null) || input keyevent --longpress 26"
+        adbRun(shutdownCmd) { _, err ->
             if (err != null) {
-                toast(tr("Cần bật ADB nội bộ để tắt TV: ", "Local ADB is needed to turn off the TV: ") + err)
+                val msgLower = err.lowercase()
+                // Ignore connection drop caused by the TV actually powering off mid-command
+                val poweredOffMidStream = msgLower.contains("eof") || msgLower.contains("broken pipe") || msgLower.contains("reset")
+                if (!poweredOffMidStream) {
+                    toast(tr("Cần bật ADB nội bộ để tắt TV: ", "Local ADB is needed to turn off the TV: ") + err)
+                }
             }
         }
     }
@@ -2537,7 +2552,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     // ---------------------------------------------------------------- Prices
     private fun priceUrl(kind: PriceKind): String = when (kind) {
         PriceKind.GOLD -> prefs.getString("urlGold", "https://webgia.com/gia-vang/sjc/") ?: "https://webgia.com/gia-vang/sjc/"
-        PriceKind.COFFEE -> prefs.getString("urlCoffee", "https://giacaphe.com/gia-ca-phe-noi-dia/") ?: "https://giacaphe.com/gia-ca-phe-noi-dia/"
+        PriceKind.COFFEE -> prefs.getString("urlCoffee", "https://giacaphe.com/") ?: "https://giacaphe.com/"
         PriceKind.PEPPER -> prefs.getString("urlPepper", "https://giacaphe.com/gia-tieu-hom-nay/") ?: "https://giacaphe.com/gia-tieu-hom-nay/"
         PriceKind.FUEL -> prefs.getString("urlFuel", "https://webgia.com/gia-xang-dau/petrolimex/") ?: "https://webgia.com/gia-xang-dau/petrolimex/"
     }
@@ -2697,6 +2712,14 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
             )
         }
         return true
+    }
+
+    fun onPriceExtractionFailed() {
+        _uiState.update { st ->
+            val cur = st.activeDialog as? ActiveDialog.PriceViewer ?: return@update st
+            if (cur.sections.isNotEmpty()) return@update st
+            st.copy(activeDialog = cur.copy(loading = false))
+        }
     }
 
     fun speakCurrentPrices() {

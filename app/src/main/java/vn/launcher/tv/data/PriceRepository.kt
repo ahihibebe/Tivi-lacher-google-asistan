@@ -11,6 +11,7 @@ import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
+import java.util.zip.GZIPInputStream
 
 /** Fetches, parses, filters (by spoken province/ward), and summarizes live price tables. */
 object PriceRepository {
@@ -24,6 +25,10 @@ object PriceRepository {
     val EXTRACT_ALL_TABLES_JS: String = """
         (function(){
           function clean(s){return (s||'').replace(/\s+/g,' ').trim();}
+          function isProvinceLike(s){
+            var t=clean(s).toLowerCase();
+            return /đắk lắk|dak lak|lâm đồng|lam dong|gia lai|đắk nông|dak nong|kon tum|đồng nai|dong nai|tây nguyên|nội địa|trong nước|hồ chí minh|tp\.?\s*hcm/.test(t);
+          }
           function findHeading(el){
             var cur=el;
             for(var step=0;step<4&&cur;step++){
@@ -41,13 +46,14 @@ object PriceRepository {
           }
           var out=[];
           var tables=document.querySelectorAll('table');
-          for(var i=0;i<tables.length&&out.length<12;i++){
+          for(var i=0;i<tables.length&&out.length<24;i++){
             var t=tables[i];
             var rows=t.querySelectorAll('tr');
             var headers=[];
             var body=[];
             var numRows=0;
-            for(var r=0;r<rows.length&&body.length<50;r++){
+            var curGroup='';
+            for(var r=0;r<rows.length&&body.length<80;r++){
               var tr=rows[r];
               var ths=tr.querySelectorAll('th');
               var tds=tr.querySelectorAll('td');
@@ -59,12 +65,23 @@ object PriceRepository {
                 var hasNum=false;
                 for(var c=0;c<cells.length;c++){
                   var v=clean(cells[c].innerText);
-                  if(/\d{2,}/.test(v)) hasNum=true;
+                  if(c>0&&/\d{2,}/.test(v)) hasNum=true;
                   row.push(v);
                 }
+                if(row.length===1&&row[0].length>=2&&row[0].length<=50&&!/\d{2,}/.test(row[0])){
+                  if(isProvinceLike(row[0])) curGroup=row[0];
+                  continue;
+                }
                 if(row.length>=2){
-                  if(hasNum) numRows++;
-                  body.push(row);
+                  if(headers.length===0&&body.length===0&&!hasNum){
+                    headers=row;
+                  } else {
+                    if(curGroup&&row[0]&&row[0].toLowerCase().indexOf(curGroup.toLowerCase())===-1&&!isProvinceLike(row[0])){
+                      row[0]=row[0]+' ('+curGroup+')';
+                    }
+                    if(hasNum) numRows++;
+                    body.push(row);
+                  }
                 }
               }
             }
@@ -72,6 +89,41 @@ object PriceRepository {
               var cap=t.querySelector('caption');
               var title=cap?clean(cap.innerText):findHeading(t);
               out.push({title:title,headers:headers,rows:body});
+            }
+          }
+          // Fallback: scan div/ul price lists if no domestic table or extra regional div blocks exist
+          var listContainers=document.querySelectorAll('ul,ol,div,section');
+          for(var lc=0;lc<listContainers.length&&out.length<28;lc++){
+            var box=listContainers[lc];
+            if(box.closest('table')) continue;
+            var children=box.children;
+            if(!children||children.length<3||children.length>35) continue;
+            var listRows=[];
+            for(var ch=0;ch<children.length;ch++){
+              var item=children[ch];
+              if(item.querySelector('table')) continue;
+              var parts=[];
+              var sub=item.children;
+              if(sub&&sub.length>=2&&sub.length<=5){
+                for(var s=0;s<sub.length;s++){
+                  var sv=clean(sub[s].innerText);
+                  if(sv) parts.push(sv);
+                }
+              } else {
+                var rawTxt=clean(item.innerText);
+                var pm=rawTxt.match(/^([^\d]{3,42}?)\s+(\d{2,3}(?:[.,]\d{3})+)(?:\s+([+\-]?\d[\d.,]*))?/);
+                if(pm){
+                  parts.push(clean(pm[1]));
+                  parts.push(pm[2]);
+                  if(pm[3]) parts.push(pm[3]);
+                }
+              }
+              if(parts.length>=2&&parts[0].length>=2&&parts[0].length<=48&&!/^\d/.test(parts[0])&&/\d{2,3}[.,]\d{3}/.test(parts.slice(1).join(' '))){
+                listRows.push(parts);
+              }
+            }
+            if(listRows.length>=2){
+              out.push({title:findHeading(box),headers:[],rows:listRows});
             }
           }
           var text=(document.body&&document.body.innerText)?document.body.innerText:'';
@@ -94,10 +146,14 @@ object PriceRepository {
         for (u in urls) {
             try {
                 val html = httpGet(u)
+                if (html.isBlank()) continue
                 if (detectedDate.isEmpty()) {
                     detectedDate = extractDateFromHtml(html)
                 }
-                val parsed = parseHtmlTables(html)
+                val parsed = ArrayList(parseHtmlTables(html))
+                if (kind == PriceKind.COFFEE && parsed.none { isDomesticCoffeeSection(it) }) {
+                    parsed.addAll(parseNonTableCoffeeRows(html))
+                }
                 if (parsed.isNotEmpty()) {
                     if (mergedSections.isEmpty()) sourceHost = hostOf(u)
                     for (sec in parsed) {
@@ -105,13 +161,17 @@ object PriceRepository {
                             mergedSections.add(sec)
                         }
                     }
-                    // For gold, keep going until ring gold is seen; for coffee, keep going until domestic provinces are seen
                     val ready = when (kind) {
                         PriceKind.GOLD -> mergedSections.any { s ->
                             s.title.lowercase(Locale.ROOT).contains("nhẫn") ||
                                 s.rows.any { r -> r.any { it.lowercase(Locale.ROOT).contains("nhẫn") } }
                         }
-                        PriceKind.COFFEE -> mergedSections.any { isDomesticCoffeeSection(it) }
+                        PriceKind.COFFEE -> {
+                            val domesticCount = mergedSections
+                                .filter { isDomesticCoffeeSection(it) && !isWorldFuturesSection(it) }
+                                .sumOf { it.rows.size }
+                            domesticCount >= 6
+                        }
                         else -> true
                     }
                     if (ready) break
@@ -165,8 +225,9 @@ object PriceRepository {
         if (primaryUrl.isNotBlank()) list.add(primaryUrl.trim())
         when (kind) {
             PriceKind.COFFEE -> {
-                addIfAbsent(list, "https://giacaphe.com/gia-ca-phe-noi-dia/")
                 addIfAbsent(list, "https://giacaphe.com/")
+                addIfAbsent(list, "https://giacaphe.com/gia-ca-phe-noi-dia/")
+                addIfAbsent(list, "https://giacaphe.com/gia-ca-phe-hom-nay/")
             }
             PriceKind.PEPPER -> {
                 addIfAbsent(list, "https://giacaphe.com/gia-tieu-hom-nay/")
@@ -213,6 +274,7 @@ object PriceRepository {
             val headers = ArrayList<String>()
             val rows = ArrayList<List<String>>()
             var numericRowCount = 0
+            var currentGroup = ""
 
             for (rm in trMatcher.findAll(tm.groupValues[1])) {
                 val trHtml = rm.groupValues[1]
@@ -222,14 +284,28 @@ object PriceRepository {
                     if (!cm.groupValues[1].equals("th", ignoreCase = true)) allTh = false
                     cells.add(stripTags(cm.groupValues[2]))
                 }
+                if (cells.size == 1 && cells[0].length in 2..50 && !hasDigits(cells[0])) {
+                    val g = cells[0].trim()
+                    val ng = VoiceCommand.norm(g)
+                    if (isDomesticCoffeeName(ng)) currentGroup = g
+                    continue
+                }
                 if (cells.size < 2) continue
                 if (allTh && headers.isEmpty()) {
                     headers.addAll(cells)
                 } else if (headers.isEmpty() && rows.isEmpty() && (1 until cells.size).none { hasDigits(cells[it]) }) {
                     headers.addAll(cells)
                 } else {
-                    if ((1 until cells.size).any { hasDigits(cells[it]) }) numericRowCount++
-                    rows.add(cells)
+                    val rowCells = cells.toMutableList()
+                    if (currentGroup.isNotEmpty() && rowCells[0].isNotBlank()) {
+                        val areaNorm = VoiceCommand.norm(rowCells[0])
+                        val grpNorm = VoiceCommand.norm(currentGroup)
+                        if (!areaNorm.contains(grpNorm) && !isProvinceLevelName(areaNorm)) {
+                            rowCells[0] = "${rowCells[0]} ($currentGroup)"
+                        }
+                    }
+                    if ((1 until rowCells.size).any { hasDigits(rowCells[it]) }) numericRowCount++
+                    rows.add(rowCells)
                 }
             }
             if (numericRowCount >= 1 && rows.isNotEmpty()) {
@@ -240,13 +316,73 @@ object PriceRepository {
         return sections
     }
 
+    /** Fallback extractor when a page renders domestic coffee prices in <div> or <li> rows instead of <table>. */
+    private fun parseNonTableCoffeeRows(html: String): List<PriceSection> {
+        val text = html
+            .replace(Regex("<script[^>]*>.*?</script>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)), "\n")
+            .replace(Regex("<style[^>]*>.*?</style>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)), "\n")
+            .replace(Regex("</?(?:tr|li|p|div|section|br|h[1-6])[^>]*>", RegexOption.IGNORE_CASE), "\n")
+            .replace(Regex("<[^>]+>"), " ")
+            .replace("&nbsp;", " ")
+            .replace("&amp;", "&")
+        val rowRegex = Regex(
+            "^\\s*([\\p{L}][\\p{L}0-9 .,'’\\-/]{2,42}?)\\s+(\\d{2,3}[.,]\\d{3}(?:\\s*(?:đ|₫|vnđ|vnd)(?:/kg)?)?)(?:\\s+([+\\-]?\\d[\\d.,]*))?\\s*$",
+            RegexOption.IGNORE_CASE
+        )
+        val rows = ArrayList<List<String>>()
+        val seenAreas = HashSet<String>()
+        for (line in text.lines()) {
+            val cleaned = line.replace(Regex("\\s+"), " ").trim()
+            if (cleaned.length !in 8..80) continue
+            val m = rowRegex.matchEntire(cleaned) ?: continue
+            val area = m.groupValues[1].trim()
+            val normArea = VoiceCommand.norm(area)
+            if (!isDomesticCoffeeName(normArea)) continue
+            val price = m.groupValues[2].trim()
+            val delta = m.groupValues[3].trim()
+            if (seenAreas.add(normArea)) {
+                rows.add(if (delta.isNotEmpty()) listOf(area, price, delta) else listOf(area, price))
+            }
+        }
+        return if (rows.size >= 2) {
+            listOf(PriceSection(title = "Bảng giá cà phê nội địa", headers = listOf("Khu vực", "Giá (VNĐ/kg)"), rows = rows))
+        } else {
+            emptyList()
+        }
+    }
+
+    private fun isProvinceLevelName(normArea: String): Boolean =
+        normArea.contains("dak lak") || normArea.contains("lam dong") ||
+            normArea.contains("gia lai") || normArea.contains("dak nong") ||
+            normArea.contains("kon tum") || normArea.contains("dong nai") ||
+            normArea.contains("ho chi minh") || normArea.contains("tp hcm")
+
+    private fun isDomesticCoffeeName(normText: String): Boolean {
+        val compact = normText.replace(" ", "")
+        return normText.contains("dak lak") || normText.contains("lam dong") ||
+            normText.contains("gia lai") || normText.contains("dak nong") ||
+            normText.contains("kon tum") || normText.contains("tay nguyen") ||
+            normText.contains("noi dia") || normText.contains("trong nuoc") ||
+            normText.contains("buon ma thuot") || normText.contains("buon ho") ||
+            compact.contains("cumgar") || compact.contains("eahleo") ||
+            normText.contains("krong") || compact.contains("cukuin") ||
+            normText.contains("bao loc") || normText.contains("di linh") ||
+            normText.contains("lam ha") || normText.contains("da lat") ||
+            normText.contains("duc trong") || normText.contains("don duong") ||
+            normText.contains("pleiku") || normText.contains("chu se") ||
+            normText.contains("chu prong") || normText.contains("ia grai") ||
+            normText.contains("gia nghia") || normText.contains("dak mil") ||
+            normText.contains("dak song") || compact.contains("dakrlap") ||
+            normText.contains("tuy duc") || normText.contains("dak ha") ||
+            normText.contains("dong nai") || normText.contains("binh phuoc") ||
+            normText.contains("trung binh") || normText.contains("ho chi minh") ||
+            normText.contains("tp hcm")
+    }
+
     private fun isDomesticCoffeeSection(s: PriceSection): Boolean {
         val text = VoiceCommand.norm(s.title) + " " +
             s.rows.joinToString(" ") { VoiceCommand.norm(it.firstOrNull()) }
-        return text.contains("dak lak") || text.contains("lam dong") ||
-            text.contains("gia lai") || text.contains("dak nong") ||
-            text.contains("kon tum") || text.contains("tay nguyen") ||
-            text.contains("noi dia") || text.contains("trong nuoc")
+        return isDomesticCoffeeName(text)
     }
 
     private fun isWorldFuturesSection(s: PriceSection): Boolean {
@@ -262,21 +398,30 @@ object PriceRepository {
     private fun postProcessSections(kind: PriceKind, raw: List<PriceSection>): List<PriceSection> {
         if (raw.isEmpty()) return emptyList()
         if (kind == PriceKind.COFFEE) {
-            val domestic = raw.filter { isDomesticCoffeeSection(it) && !isWorldFuturesSection(it) }
-                .distinctBy { it.rows.take(3) }
-                .map { sec ->
-                    val normTitle = VoiceCommand.norm(sec.title)
-                    val cleanTitle = when {
-                        sec.title.isBlank() || (!normTitle.contains("noi dia") && !normTitle.contains("trong nuoc")) ->
-                            "Bảng giá cà phê nội địa"
-                        else -> sec.title
-                    }
-                    sec.copy(title = cleanTitle)
-                }
-            if (domestic.isNotEmpty()) return domestic.take(6)
+            val domesticRaw = raw
+                .filter { isDomesticCoffeeSection(it) && !isWorldFuturesSection(it) }
+                .sortedByDescending { it.rows.size }
+                .distinctBy { it.rows }
 
-            val nonWorld = raw.filterNot { isWorldFuturesSection(it) }.distinctBy { it.rows.take(3) }
-            if (nonWorld.isNotEmpty()) return nonWorld.take(6)
+            // Drop smaller strict subsets when a fuller table already contains the exact same rows
+            val filtered = ArrayList<PriceSection>()
+            for (sec in domesticRaw) {
+                val isSubset = filtered.any { larger ->
+                    larger.rows.size > sec.rows.size && sec.rows.all { r -> larger.rows.contains(r) }
+                }
+                if (!isSubset) filtered.add(sec)
+            }
+
+            val domestic = filtered.map { sec ->
+                val cleanTitle = sec.title.trim().ifEmpty { "Bảng giá cà phê nội địa" }
+                sec.copy(title = cleanTitle)
+            }
+            if (domestic.isNotEmpty()) return domestic.take(8)
+
+            val nonWorld = raw.filterNot { isWorldFuturesSection(it) }
+                .sortedByDescending { it.rows.size }
+                .distinctBy { it.rows }
+            if (nonWorld.isNotEmpty()) return nonWorld.take(8)
         }
         if (kind == PriceKind.GOLD) {
             // Prioritize & label Vàng miếng vs Vàng nhẫn clearly
@@ -288,9 +433,9 @@ object PriceRepository {
                     else -> 1
                 }
             }
-            return sorted.distinctBy { it.rows.take(3) }.take(6)
+            return sorted.distinctBy { it.rows }.take(8)
         }
-        return raw.distinctBy { it.rows.take(3) }.take(6)
+        return raw.distinctBy { it.rows }.take(8)
     }
 
     /** Matches rows against the user's spoken province/commune or resolved parent province. */
@@ -311,8 +456,12 @@ object PriceRepository {
                 if ((1 until row.size).none { hasDigits(row[it]) }) continue
                 val areaNorm = stripAdminPrefix(VoiceCommand.norm(areaRaw))
                 if (areaNorm.isEmpty()) continue
+                val areaCompact = areaNorm.replace(" ", "")
                 val matched = targets.any { t ->
-                    areaNorm == t || areaNorm.contains(t) || (areaNorm.length >= 4 && t.contains(areaNorm))
+                    val tCompact = t.replace(" ", "")
+                    areaNorm == t || areaNorm.contains(t) || (areaNorm.length >= 4 && t.contains(areaNorm)) ||
+                        (areaCompact.length >= 4 && tCompact.length >= 4 &&
+                            (areaCompact == tCompact || areaCompact.contains(tCompact) || tCompact.contains(areaCompact)))
                 }
                 if (matched && seen.add(areaNorm + "|" + row.drop(1).joinToString("|"))) {
                     out.add(PriceMatchRow(sec.title, areaRaw, row.drop(1)))
@@ -328,30 +477,55 @@ object PriceRepository {
             if (raw.isNullOrBlank()) return
             val n = stripAdminPrefix(VoiceCommand.norm(raw))
             if (n.length >= 3) candidates.add(n)
-            // Expand merged/historical province equivalents used by giacaphe.com
+            // Expand merged/historical province equivalents and key coffee districts used by giacaphe.com
             when (n) {
                 "lam dong" -> {
                     candidates.add("dak nong")
                     candidates.add("bao loc")
                     candidates.add("di linh")
                     candidates.add("lam ha")
+                    candidates.add("da lat")
+                    candidates.add("duc trong")
+                    candidates.add("don duong")
                 }
-                "dak nong" -> candidates.add("lam dong")
+                "dak nong" -> {
+                    candidates.add("lam dong")
+                    candidates.add("gia nghia")
+                    candidates.add("dak mil")
+                    candidates.add("dak song")
+                    candidates.add("dak r lap")
+                    candidates.add("tuy duc")
+                    candidates.add("cu jut")
+                }
                 "gia lai" -> {
                     candidates.add("pleiku")
                     candidates.add("chu se")
                     candidates.add("chu prong")
+                    candidates.add("ia grai")
+                    candidates.add("duc co")
+                    candidates.add("mang yang")
                 }
                 "dak lak" -> {
                     candidates.add("buon ma thuot")
                     candidates.add("ea h leo")
                     candidates.add("cu m gar")
                     candidates.add("buon ho")
+                    candidates.add("krong nang")
+                    candidates.add("krong pak")
+                    candidates.add("cu kuin")
                 }
                 "dong nai" -> candidates.add("binh phuoc")
                 "binh phuoc" -> candidates.add("dong nai")
-                "quang ngai" -> candidates.add("kon tum")
-                "kon tum" -> candidates.add("quang ngai")
+                "quang ngai" -> {
+                    candidates.add("kon tum")
+                    candidates.add("dak ha")
+                    candidates.add("dak to")
+                }
+                "kon tum" -> {
+                    candidates.add("quang ngai")
+                    candidates.add("dak ha")
+                    candidates.add("dak to")
+                }
                 "ho chi minh" -> candidates.add("ba ria vung tau")
                 "ba ria vung tau" -> candidates.add("ho chi minh")
             }
@@ -367,7 +541,7 @@ object PriceRepository {
     }
 
     private fun stripAdminPrefix(s: String): String = s
-        .replace(Regex("\\b(tinh|thanh pho|tp|huyen|quan|thi xa|xa|phuong|thi tran)\\b"), " ")
+        .replace(Regex("\\b(o|tai|khu vuc|tinh|thanh pho|tp|huyen|quan|thi xa|xa|phuong|thi tran)\\b"), " ")
         .replace(Regex("\\s+"), " ")
         .trim()
 
@@ -520,6 +694,9 @@ object PriceRepository {
                 )
                 setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                 setRequestProperty("Accept-Language", "vi-VN,vi;q=0.9,en-US;q=0.8")
+                setRequestProperty("Accept-Encoding", "gzip")
+                setRequestProperty("Referer", "https://www.google.com/")
+                setRequestProperty("Cache-Control", "no-cache")
             }
             try {
                 val code = conn.responseCode
@@ -529,7 +706,13 @@ object PriceRepository {
                     redirects++
                     continue
                 }
-                return conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                if (code !in 200..299) return ""
+                val rawStream = if (conn.contentEncoding?.contains("gzip", ignoreCase = true) == true) {
+                    GZIPInputStream(conn.inputStream)
+                } else {
+                    conn.inputStream
+                }
+                return rawStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
             } finally {
                 conn.disconnect()
             }

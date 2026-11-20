@@ -12,7 +12,6 @@ import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -161,96 +160,115 @@ fun HomeScreen(
                     // Header row
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.Start),
                         verticalAlignment = Alignment.Top
                     ) {
-                        // Left: greeting, clock, date, lunar, bars, holiday, now playing, lunar alert
+                        // Left: Clock / Date / System bars wrapped in macOS glass widget card
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = state.header.greeting,
-                                color = LauncherColors.TextSecondary,
-                                fontSize = 12.sp,
-                                letterSpacing = 1.2.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(top = 2.dp)
+                            Column(
+                                modifier = Modifier
+                                    .widthIn(max = 390.dp)
+                                    .clip(RoundedCornerShape(22.dp))
+                                    .background(barSurfaceBrush(state.theme), RoundedCornerShape(22.dp))
+                                    .border(1.dp, Color(0x3DFFFFFF), RoundedCornerShape(22.dp))
+                                    .padding(horizontal = 18.dp, vertical = 14.dp)
                             ) {
                                 Text(
-                                    text = state.header.timeText.ifEmpty { "00:00" },
-                                    color = Color.White,
-                                    fontSize = if (isCompactWidth) 38.sp else 48.sp,
-                                    fontWeight = FontWeight.Light,
-                                    letterSpacing = (-1).sp
+                                    text = state.header.greeting,
+                                    color = LauncherColors.TextSecondary,
+                                    fontSize = 12.sp,
+                                    letterSpacing = 1.2.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
-                                Spacer(Modifier.width(18.dp))
-                                Column {
+
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(top = 2.dp)
+                                ) {
                                     Text(
-                                        text = state.header.dateText,
-                                        color = LauncherColors.TextSecondary,
-                                        fontSize = 12.sp,
-                                        letterSpacing = 0.8.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+                                        text = state.header.timeText.ifEmpty { "00:00" },
+                                        color = Color.White,
+                                        fontSize = if (isCompactWidth) 36.sp else 46.sp,
+                                        fontWeight = FontWeight.Light,
+                                        letterSpacing = (-1).sp
                                     )
-                                    if (state.header.lunarText.isNotEmpty()) {
+                                    Spacer(Modifier.width(16.dp))
+                                    Column {
                                         Text(
-                                            text = state.header.lunarText,
-                                            color = LauncherColors.TextMuted,
-                                            fontSize = 11.sp,
-                                            letterSpacing = 0.4.sp,
+                                            text = state.header.dateText,
+                                            color = LauncherColors.TextSecondary,
+                                            fontSize = 12.sp,
+                                            letterSpacing = 0.8.sp,
                                             maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            modifier = Modifier.padding(top = 2.dp)
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        if (state.header.lunarText.isNotEmpty()) {
+                                            Text(
+                                                text = state.header.lunarText,
+                                                color = LauncherColors.TextMuted,
+                                                fontSize = 11.sp,
+                                                letterSpacing = 0.4.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.padding(top = 2.dp)
+                                            )
+                                        }
+                                    }
+                                }
+
+                                if (state.sysBars.enabled) {
+                                    Spacer(Modifier.height(8.dp))
+                                    SystemBarItem(
+                                        icon = Icons.Filled.Storage,
+                                        percent = state.sysBars.storagePercent,
+                                        label = String.format(
+                                            Locale.US,
+                                            "%.1f/%.1f GB",
+                                            state.sysBars.storageUsedGb,
+                                            state.sysBars.storageTotalGb
+                                        )
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    SystemBarItem(
+                                        icon = Icons.Filled.Memory,
+                                        percent = state.sysBars.ramPercent,
+                                        label = String.format(
+                                            Locale.US,
+                                            "%.1f/%.1f GB",
+                                            state.sysBars.ramUsedGb,
+                                            state.sysBars.ramTotalGb
+                                        )
+                                    )
+                                }
+
+                                if (!state.header.holidayText.isNullOrEmpty()) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(top = 8.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Favorite,
+                                            contentDescription = null,
+                                            tint = LauncherColors.HeartRed,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            text = state.header.holidayText,
+                                            color = LauncherColors.TextSecondary,
+                                            fontSize = 11.sp
                                         )
                                     }
                                 }
-                            }
 
-                            if (state.sysBars.enabled) {
-                                Spacer(Modifier.height(6.dp))
-                                SystemBarItem(
-                                    icon = Icons.Filled.Storage,
-                                    percent = state.sysBars.storagePercent,
-                                    label = String.format(
-                                        Locale.US,
-                                        "%.1f/%.1f GB",
-                                        state.sysBars.storageUsedGb,
-                                        state.sysBars.storageTotalGb
-                                    )
-                                )
-                                Spacer(Modifier.height(4.dp))
-                                SystemBarItem(
-                                    icon = Icons.Filled.Memory,
-                                    percent = state.sysBars.ramPercent,
-                                    label = String.format(
-                                        Locale.US,
-                                        "%.1f/%.1f GB",
-                                        state.sysBars.ramUsedGb,
-                                        state.sysBars.ramTotalGb
-                                    )
-                                )
-                            }
-
-                            if (!state.header.holidayText.isNullOrEmpty()) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(top = 8.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.Favorite,
-                                        contentDescription = null,
-                                        tint = LauncherColors.HeartRed,
-                                        modifier = Modifier.size(13.dp)
-                                    )
-                                    Spacer(Modifier.width(6.dp))
+                                if (!state.header.lunarAlertText.isNullOrEmpty()) {
                                     Text(
-                                        text = state.header.holidayText,
-                                        color = LauncherColors.TextSecondary,
-                                        fontSize = 11.sp
+                                        text = state.header.lunarAlertText,
+                                        color = LauncherColors.AlertRed,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(top = 5.dp)
                                     )
                                 }
                             }
@@ -286,23 +304,17 @@ fun HomeScreen(
                                     }
                                 }
                             }
-
-                            if (!state.header.lunarAlertText.isNullOrEmpty()) {
-                                Text(
-                                    text = state.header.lunarAlertText,
-                                    color = LauncherColors.AlertRed,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(top = 4.dp)
-                                )
-                            }
                         }
 
-                        // Middle-Right: Weather
+                        // Middle-Right: Weather in macOS glass widget card
                         if (state.weather.enabled) {
                             Column(
                                 horizontalAlignment = Alignment.End,
-                                modifier = Modifier.padding(end = if (isCompactWidth) 10.dp else 22.dp)
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(22.dp))
+                                    .background(barSurfaceBrush(state.theme), RoundedCornerShape(22.dp))
+                                    .border(1.dp, Color(0x3DFFFFFF), RoundedCornerShape(22.dp))
+                                    .padding(horizontal = 16.dp, vertical = 12.dp)
                             ) {
                                 if (!state.weather.hasData) {
                                     Text("…", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Light)
@@ -456,10 +468,11 @@ fun HomeScreen(
                             if (state.display.photoFrameOn) {
                                 Spacer(Modifier.height(10.dp))
                                 LedFocusTile(
-                                    modifier = Modifier.size(if (isCompactWidth) 110.dp else 144.dp),
+                                    modifier = Modifier.size(if (isCompactWidth) 114.dp else 148.dp),
                                     theme = state.theme,
-                                    cornerRadius = 16.dp,
+                                    cornerRadius = 18.dp,
                                     focusScale = 1.05f,
+                                    showOuterRing = true,
                                     testTag = "photo_slideshow_card",
                                     onFocused = {
                                         onTileFocused(if (en) "Photo slideshow" else "Trình chiếu ảnh")
@@ -530,7 +543,7 @@ fun HomeScreen(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(22.dp))
                                     .background(barSurfaceBrush(state.theme), RoundedCornerShape(22.dp))
-                                    .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(22.dp))
+                                    .border(1.dp, Color(0x3DFFFFFF), RoundedCornerShape(22.dp))
                                     .padding(10.dp),
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
@@ -629,7 +642,7 @@ fun HomeScreen(
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(26.dp))
                                 .background(barSurfaceBrush(state.theme), RoundedCornerShape(26.dp))
-                                .border(1.dp, Color(0x36FFFFFF), RoundedCornerShape(26.dp))
+                                .border(1.dp, Color(0x3DFFFFFF), RoundedCornerShape(26.dp))
                                 .padding(14.dp)
                         ) {
                             if (state.dockApps.isEmpty()) {
@@ -715,44 +728,50 @@ fun HomeScreen(
                 }
 
                 if (state.gridApps.isNotEmpty()) {
-                    Text(
-                        text = if (en) "All apps" else "Tất cả ứng dụng",
-                        color = Color(0xB3FFFFFF),
-                        fontSize = 14.sp,
-                        modifier = Modifier.padding(start = 12.dp, top = 12.dp, bottom = 10.dp)
-                    )
-
-                    val rows = state.gridApps.chunked(4)
                     Column(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                            .fillMaxWidth(0.82f)
+                            .align(Alignment.CenterHorizontally)
                     ) {
-                        rows.forEachIndexed { rowIdx, rowApps ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(16.dp)
-                            ) {
-                                for (colIdx in 0 until 4) {
-                                    val app = rowApps.getOrNull(colIdx)
-                                    val flatIdx = rowIdx * 4 + colIdx
-                                    if (app != null) {
-                                        AppTileCard(
-                                            app = app,
-                                            theme = state.theme,
-                                            showOuterRing = true,
-                                            isMoving = state.movingPkg == app.pkg,
-                                            testTag = "grid_tile_$flatIdx",
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .aspectRatio(16f / 9f),
-                                            onFocused = { onTileFocused(app.label) },
-                                            onClick = { onAppClick(app) },
-                                            onLongClick = { onAppLongClick(app) }
-                                        )
-                                    } else {
-                                        Spacer(Modifier.weight(1f))
+                        Text(
+                            text = if (en) "All apps" else "Tất cả ứng dụng",
+                            color = Color(0xB3FFFFFF),
+                            fontSize = 14.sp,
+                            modifier = Modifier.padding(start = 12.dp, top = 12.dp, bottom = 10.dp)
+                        )
+
+                        val rows = state.gridApps.chunked(4)
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp),
+                            verticalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            rows.forEachIndexed { rowIdx, rowApps ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                                ) {
+                                    for (colIdx in 0 until 4) {
+                                        val app = rowApps.getOrNull(colIdx)
+                                        val flatIdx = rowIdx * 4 + colIdx
+                                        if (app != null) {
+                                            AppTileCard(
+                                                app = app,
+                                                theme = state.theme,
+                                                showOuterRing = true,
+                                                isMoving = state.movingPkg == app.pkg,
+                                                testTag = "grid_tile_$flatIdx",
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .aspectRatio(16f / 9f),
+                                                onFocused = { onTileFocused(app.label) },
+                                                onClick = { onAppClick(app) },
+                                                onLongClick = { onAppLongClick(app) }
+                                            )
+                                        } else {
+                                            Spacer(Modifier.weight(1f))
+                                        }
                                     }
                                 }
                             }
@@ -918,7 +937,6 @@ private fun DockTabDot(
                 shape = CircleShape
             )
             .onFocusChanged { focused = it.isFocused }
-            .focusable(interactionSource = interactionSource)
             .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
     )
 }
@@ -940,7 +958,7 @@ private fun AppTileCard(
     }
 
     LedFocusTile(
-        modifier = modifier.then(if (showOuterRing) Modifier.padding(4.dp) else Modifier),
+        modifier = modifier,
         theme = theme,
         cornerRadius = 14.dp,
         focusScale = 1.18f,

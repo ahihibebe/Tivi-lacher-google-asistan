@@ -255,7 +255,6 @@ fun MusicPanelDialog(
                                 shape
                             )
                             .onFocusChanged { focused = it.isFocused }
-                            .focusable()
                             .clickable { onSelectTrack(index) }
                             .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -313,7 +312,6 @@ fun HeaderChipButton(
             .background(if (focused) Color(0xFF0A84FF) else Color(0x26FFFFFF), shape)
             .border(1.dp, if (focused) Color.White else Color(0x33FFFFFF), shape)
             .onFocusChanged { focused = it.isFocused }
-            .focusable()
             .clickable(onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 5.dp)
     ) {
@@ -340,7 +338,6 @@ fun PlayerControlIcon(
             .background(if (focused) LauncherColors.accent(theme) else Color(0x28FFFFFF))
             .border(if (focused) 1.5.dp else 0.5.dp, if (focused) Color.White else Color(0x33FFFFFF), CircleShape)
             .onFocusChanged { focused = it.isFocused }
-            .focusable(interactionSource = interactionSource)
             .clickable(interactionSource = interactionSource, indication = null, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
