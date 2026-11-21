@@ -1,5 +1,6 @@
 package vn.launcher.tv.ui.screens
 
+import android.view.KeyEvent as AndroidKeyEvent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.drawable.Drawable
@@ -7,11 +8,14 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.BringIntoViewSpec
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -48,8 +52,10 @@ import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -60,6 +66,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
@@ -67,7 +74,12 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -94,6 +106,12 @@ import vn.launcher.tv.ui.theme.LauncherColors
 import java.io.File
 import java.util.Locale
 
+@OptIn(ExperimentalFoundationApi::class)
+private object LockedPageBringIntoViewSpec : BringIntoViewSpec {
+    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float = 0f
+}
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
     state: LauncherUiState,
@@ -115,15 +133,60 @@ fun HomeScreen(
     onTabSelected: (DockTab) -> Unit
 ) {
     val scope = rememberCoroutineScope()
-    val firstDockFocus = remember { FocusRequester() }
+    val dockFocusRequesters = remember { List(4) { FocusRequester() } }
+    val firstDockFocus = dockFocusRequesters[0]
+    val gridFirstRowRequesters = remember { List(4) { FocusRequester() } }
     val settingsPillFocus = remember { FocusRequester() }
     val en = state.isEnglish
 
-    LaunchedEffect(state.dockApps.firstOrNull()?.pkg) {
-        if (state.activeDialog == null && !state.slideshow.fullscreenOpen) {
+    var isAllAppsActive by remember { mutableStateOf(scrollState.value > 40) }
+    var prevScrollValue by remember { mutableIntStateOf(scrollState.value) }
+    var allAppsTopPx by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(scrollState.value) {
+        if (scrollState.value > 40) {
+            isAllAppsActive = true
+        } else if (prevScrollValue > 40 && scrollState.value <= 8 && isAllAppsActive) {
+            isAllAppsActive = false
             try {
                 firstDockFocus.requestFocus()
             } catch (_: Exception) {
+            }
+        }
+        prevScrollValue = scrollState.value
+    }
+
+    LaunchedEffect(state.dockApps.firstOrNull()?.pkg) {
+        if (state.activeDialog == null && !state.slideshow.fullscreenOpen && !isAllAppsActive) {
+            try {
+                firstDockFocus.requestFocus()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    fun returnToDockTop() {
+        scope.launch {
+            isAllAppsActive = false
+            val movedToDock = try {
+                firstDockFocus.requestFocus()
+                true
+            } catch (_: Exception) {
+                false
+            }
+            if (!movedToDock) {
+                try {
+                    settingsPillFocus.requestFocus()
+                } catch (_: Exception) {
+                }
+            }
+            delay(40L)
+            try {
+                scrollState.animateScrollTo(0)
+            } finally {
+                if (scrollState.value > 0) {
+                    scrollState.scrollTo(0)
+                }
             }
         }
     }
@@ -146,20 +209,24 @@ fun HomeScreen(
             val viewportHeight = maxHeight
             val isCompactWidth = maxWidth < 680.dp
             val hPad = if (isCompactWidth) 20.dp else 44.dp
+            val defaultBringIntoView = LocalBringIntoViewSpec.current
+            val activeBringIntoView = if (isAllAppsActive) defaultBringIntoView else LockedPageBringIntoViewSpec
 
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(scrollState)
-                    .padding(horizontal = hPad, vertical = 16.dp)
-            ) {
-                // First viewport page (Header + TV frame + Dock anchored at bottom)
+            CompositionLocalProvider(LocalBringIntoViewSpec provides activeBringIntoView) {
                 Column(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = (viewportHeight - 32.dp).coerceAtLeast(360.dp)),
-                    verticalArrangement = Arrangement.SpaceBetween
+                        .fillMaxSize()
+                        .verticalScroll(scrollState)
+                        .padding(horizontal = hPad, vertical = 14.dp)
                 ) {
+                    // First viewport page (Header + TV frame + Dock anchored at bottom)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = (viewportHeight - 36.dp).coerceAtLeast(360.dp))
+                            .padding(bottom = 8.dp),
+                        verticalArrangement = Arrangement.SpaceBetween
+                    ) {
                     // Header row
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -602,13 +669,14 @@ fun HomeScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(start = 12.dp, bottom = 8.dp),
+                                .height(36.dp)
+                                .padding(start = 12.dp, bottom = 6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
                                 text = state.focusedLabel,
                                 color = Color.White,
-                                fontSize = if (isCompactWidth) 20.sp else 26.sp,
+                                fontSize = if (isCompactWidth) 20.sp else 24.sp,
                                 fontWeight = FontWeight.Light,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -647,7 +715,7 @@ fun HomeScreen(
                                 .clip(RoundedCornerShape(26.dp))
                                 .background(barSurfaceBrush(state.theme), RoundedCornerShape(26.dp))
                                 .border(1.dp, Color(0x3DFFFFFF), RoundedCornerShape(26.dp))
-                                .padding(14.dp)
+                                .padding(horizontal = 16.dp, vertical = 14.dp)
                         ) {
                             if (state.dockApps.isEmpty()) {
                                 Text(
@@ -674,13 +742,44 @@ fun HomeScreen(
                                             AppTileCard(
                                                 app = app,
                                                 theme = state.theme,
+                                                focusScale = 1.06f,
                                                 showOuterRing = false,
                                                 isMoving = state.movingPkg == app.pkg,
                                                 testTag = "dock_tile_$i",
                                                 modifier = Modifier
                                                     .weight(1f)
                                                     .aspectRatio(16f / 9f)
-                                                    .then(if (i == 0) Modifier.focusRequester(firstDockFocus) else Modifier),
+                                                    .focusRequester(dockFocusRequesters[i])
+                                                    .onPreviewKeyEvent { ev ->
+                                                        if (ev.type == KeyEventType.KeyDown &&
+                                                            ev.nativeKeyEvent.keyCode == AndroidKeyEvent.KEYCODE_DPAD_DOWN
+                                                        ) {
+                                                            if (state.gridApps.isNotEmpty()) {
+                                                                isAllAppsActive = true
+                                                                val targetCol = i.coerceAtMost(
+                                                                    (state.gridApps.size - 1).coerceAtLeast(0)
+                                                                ).coerceAtMost(3)
+                                                                scope.launch {
+                                                                    delay(16L)
+                                                                    try {
+                                                                        gridFirstRowRequesters[targetCol].requestFocus()
+                                                                    } catch (_: Exception) {
+                                                                        try {
+                                                                            gridFirstRowRequesters[0].requestFocus()
+                                                                        } catch (_: Exception) {
+                                                                        }
+                                                                    }
+                                                                    val scrollTarget = (allAppsTopPx - 12).coerceAtLeast(0)
+                                                                    if (scrollTarget > 0) {
+                                                                        scrollState.animateScrollTo(scrollTarget)
+                                                                    }
+                                                                }
+                                                            }
+                                                            true
+                                                        } else {
+                                                            false
+                                                        }
+                                                    },
                                                 onFocused = { onTileFocused(app.label) },
                                                 onClick = { onAppClick(app) },
                                                 onLongClick = { onAppLongClick(app) }
@@ -696,107 +795,113 @@ fun HomeScreen(
                 }
 
                 // Below the fold: Up Arrow pill + All Apps 4-column grid
+                // Focus is gated behind isAllAppsActive so D-pad Down only opens All Apps from Dock tiles.
                 Spacer(Modifier.height(14.dp))
-                Box(
-                    modifier = Modifier.fillMaxWidth(),
-                    contentAlignment = Alignment.Center
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onGloballyPositioned { coords ->
+                            allAppsTopPx = coords.positionInParent().y.toInt()
+                        }
+                        .focusProperties { canFocus = isAllAppsActive }
                 ) {
-                    GlassPill(
-                        theme = state.theme,
-                        testTag = "up_arrow_button",
-                        onFocused = onMoveSound,
-                        onClick = {
-                            scope.launch {
-                                val movedToDock = try {
-                                    firstDockFocus.requestFocus()
+                    Box(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        GlassPill(
+                            modifier = Modifier.onPreviewKeyEvent { ev ->
+                                if (ev.type == KeyEventType.KeyDown &&
+                                    ev.nativeKeyEvent.keyCode == AndroidKeyEvent.KEYCODE_DPAD_UP
+                                ) {
+                                    returnToDockTop()
                                     true
-                                } catch (_: Exception) {
+                                } else {
                                     false
                                 }
-                                if (!movedToDock) {
-                                    try {
-                                        settingsPillFocus.requestFocus()
-                                    } catch (_: Exception) {
-                                    }
-                                }
-                                delay(40L)
-                                try {
-                                    scrollState.animateScrollTo(0)
-                                } finally {
-                                    if (scrollState.value > 0) {
-                                        scrollState.scrollTo(0)
-                                    }
-                                }
+                            },
+                            theme = state.theme,
+                            testTag = "up_arrow_button",
+                            onFocused = onMoveSound,
+                            onClick = { returnToDockTop() }
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .width(72.dp)
+                                    .height(48.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.KeyboardArrowUp,
+                                    contentDescription = if (en) "Back to top" else "Lên đầu trang",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(24.dp)
+                                )
                             }
                         }
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .width(72.dp)
-                                .height(48.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.KeyboardArrowUp,
-                                contentDescription = if (en) "Back to top" else "Lên đầu trang",
-                                tint = Color.White,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
                     }
-                }
 
-                if (state.gridApps.isNotEmpty()) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth(0.82f)
-                            .align(Alignment.CenterHorizontally)
-                    ) {
-                        Text(
-                            text = if (en) "All apps" else "Tất cả ứng dụng",
-                            color = Color(0xB3FFFFFF),
-                            fontSize = 14.sp,
-                            modifier = Modifier.padding(start = 12.dp, top = 12.dp, bottom = 10.dp)
-                        )
-
-                        val rows = state.gridApps.chunked(4)
+                    if (state.gridApps.isNotEmpty()) {
                         Column(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp),
-                            verticalArrangement = Arrangement.spacedBy(14.dp)
+                                .fillMaxWidth(0.82f)
+                                .align(Alignment.CenterHorizontally)
                         ) {
-                            rows.forEachIndexed { rowIdx, rowApps ->
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(14.dp)
-                                ) {
-                                    for (colIdx in 0 until 4) {
-                                        val app = rowApps.getOrNull(colIdx)
-                                        val flatIdx = rowIdx * 4 + colIdx
-                                        if (app != null) {
-                                            AppTileCard(
-                                                app = app,
-                                                theme = state.theme,
-                                                showOuterRing = true,
-                                                isMoving = state.movingPkg == app.pkg,
-                                                testTag = "grid_tile_$flatIdx",
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .aspectRatio(16f / 9f),
-                                                onFocused = { onTileFocused(app.label) },
-                                                onClick = { onAppClick(app) },
-                                                onLongClick = { onAppLongClick(app) }
-                                            )
-                                        } else {
-                                            Spacer(Modifier.weight(1f))
+                            Text(
+                                text = if (en) "All apps" else "Tất cả ứng dụng",
+                                color = Color(0xB3FFFFFF),
+                                fontSize = 14.sp,
+                                modifier = Modifier.padding(start = 12.dp, top = 12.dp, bottom = 10.dp)
+                            )
+
+                            val rows = state.gridApps.chunked(4)
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp),
+                                verticalArrangement = Arrangement.spacedBy(14.dp)
+                            ) {
+                                rows.forEachIndexed { rowIdx, rowApps ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                                    ) {
+                                        for (colIdx in 0 until 4) {
+                                            val app = rowApps.getOrNull(colIdx)
+                                            val flatIdx = rowIdx * 4 + colIdx
+                                            if (app != null) {
+                                                AppTileCard(
+                                                    app = app,
+                                                    theme = state.theme,
+                                                    focusScale = 1.08f,
+                                                    showOuterRing = true,
+                                                    isMoving = state.movingPkg == app.pkg,
+                                                    testTag = "grid_tile_$flatIdx",
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .aspectRatio(16f / 9f)
+                                                        .then(
+                                                            if (rowIdx == 0) {
+                                                                Modifier.focusRequester(gridFirstRowRequesters[colIdx])
+                                                            } else {
+                                                                Modifier
+                                                            }
+                                                        ),
+                                                    onFocused = { onTileFocused(app.label) },
+                                                    onClick = { onAppClick(app) },
+                                                    onLongClick = { onAppLongClick(app) }
+                                                )
+                                            } else {
+                                                Spacer(Modifier.weight(1f))
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
+                        Spacer(Modifier.height(32.dp))
                     }
-                    Spacer(Modifier.height(32.dp))
+                }
                 }
             }
         }
@@ -967,6 +1072,7 @@ private fun DockTabDot(
 private fun AppTileCard(
     app: AppItem,
     theme: LauncherTheme,
+    focusScale: Float = 1.07f,
     showOuterRing: Boolean,
     isMoving: Boolean,
     testTag: String,
@@ -983,7 +1089,7 @@ private fun AppTileCard(
         modifier = modifier,
         theme = theme,
         cornerRadius = 14.dp,
-        focusScale = 1.18f,
+        focusScale = focusScale,
         showOuterRing = showOuterRing,
         testTag = testTag,
         onFocused = onFocused,

@@ -30,6 +30,8 @@ private const val RECAPTCHA_SITE_KEY_RES = "recaptcha_site_key"
 
 private const val CUSTOM_PREFS = "app_check_cfg"
 private const val KEY_CUSTOM_DEBUG_TOKEN = "custom_debug_token"
+private const val AI_KEY_PREFS = "ai_personal_cfg"
+private const val KEY_PERSONAL_GEMINI_API_KEY = "personal_gemini_api_key"
 
 enum class AppCheckMode {
     DEBUG_INTENT,
@@ -135,12 +137,43 @@ fun configureAppCheck(context: Context, intent: Intent?) {
  * client initialize in the background when the launcher starts instead of
  * adding cold-start latency to the user's first AI query.
  */
-fun prewarmAppCheck(context: Context) {
+fun prewarmAppCheck(context: Context, forceRefresh: Boolean = false) {
     val appCtx = context.applicationContext
     warmUpScope.launch {
         GeminiAiService.warmup(appCtx)
+        if (!getPersonalGeminiApiKey(appCtx).isNullOrEmpty()) return@launch
         if (currentAppCheckMode == AppCheckMode.UNCONFIGURED) return@launch
-        awaitAppCheckReady(appCtx, timeoutMs = 12_000L)
+        awaitAppCheckReady(appCtx, timeoutMs = 12_000L, forceRefresh = forceRefresh)
+    }
+}
+
+fun getPersonalGeminiApiKey(context: Context): String? {
+    val prefs = context.applicationContext.getSharedPreferences(AI_KEY_PREFS, Context.MODE_PRIVATE)
+    return prefs.getString(KEY_PERSONAL_GEMINI_API_KEY, null)?.trim()?.takeIf { it.isNotEmpty() }
+}
+
+fun savePersonalGeminiApiKey(context: Context, rawKey: String?) {
+    val cleaned = rawKey?.trim()?.takeIf { it.isNotEmpty() }
+    val prefs = context.applicationContext.getSharedPreferences(AI_KEY_PREFS, Context.MODE_PRIVATE)
+    prefs.edit().apply {
+        if (cleaned == null) remove(KEY_PERSONAL_GEMINI_API_KEY)
+        else putString(KEY_PERSONAL_GEMINI_API_KEY, cleaned)
+    }.commit()
+}
+
+fun maskGeminiApiKey(key: String?): String {
+    val clean = key?.trim().orEmpty()
+    if (clean.isEmpty()) return ""
+    return if (clean.length <= 10) "••••••"
+    else "${clean.take(6)}••••${clean.takeLast(4)}"
+}
+
+fun getFirebaseAppId(context: Context): String? {
+    return try {
+        val app = FirebaseApp.getApps(context).firstOrNull() ?: FirebaseApp.initializeApp(context)
+        app?.options?.applicationId
+    } catch (_: Exception) {
+        null
     }
 }
 
@@ -174,12 +207,13 @@ fun saveCustomDebugTokenAndReconfigure(context: Context, rawToken: String?) {
         else putString(KEY_CUSTOM_DEBUG_TOKEN, cleaned)
     }.commit()
     configureAppCheck(appCtx, null)
-    prewarmAppCheck(appCtx)
+    prewarmAppCheck(appCtx, forceRefresh = true)
 }
 
 suspend fun awaitAppCheckReady(
     context: Context,
-    timeoutMs: Long = 8_000L
+    timeoutMs: Long = 8_000L,
+    forceRefresh: Boolean = false
 ): AppCheckCheckResult = withContext(Dispatchers.IO) {
     if (FirebaseApp.getApps(context).isEmpty()) {
         return@withContext AppCheckCheckResult.Failed("FirebaseApp is not initialized.")
@@ -188,14 +222,14 @@ suspend fun awaitAppCheckReady(
         return@withContext AppCheckCheckResult.Failed("App Check provider is unconfigured.")
     }
     val now = System.currentTimeMillis()
-    if (lastReadyAtMs > 0L && now - lastReadyAtMs < READY_CACHE_TTL_MS) {
+    if (!forceRefresh && lastReadyAtMs > 0L && now - lastReadyAtMs < READY_CACHE_TTL_MS) {
         return@withContext AppCheckCheckResult.Ready
     }
     val res = withTimeoutOrNull(timeoutMs) {
         suspendCancellableCoroutine<AppCheckCheckResult> { cont ->
             try {
                 FirebaseAppCheck.getInstance()
-                    .getAppCheckToken(false)
+                    .getAppCheckToken(forceRefresh)
                     .addOnSuccessListener {
                         lastReadyAtMs = System.currentTimeMillis()
                         if (cont.isActive) cont.resume(AppCheckCheckResult.Ready)
@@ -219,7 +253,7 @@ suspend fun awaitAppCheckReady(
 
 suspend fun diagnoseAppCheckTokenError(context: Context): String? {
     lastReadyAtMs = 0L
-    return when (val r = awaitAppCheckReady(context, timeoutMs = 8_000L)) {
+    return when (val r = awaitAppCheckReady(context, timeoutMs = 8_000L, forceRefresh = true)) {
         AppCheckCheckResult.Ready -> null
         AppCheckCheckResult.TimedOut -> "App Check token request timed out."
         is AppCheckCheckResult.Failed -> r.message

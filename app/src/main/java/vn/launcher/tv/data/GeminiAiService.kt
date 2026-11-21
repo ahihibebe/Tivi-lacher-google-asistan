@@ -16,10 +16,19 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.net.HttpURLConnection
+import java.net.URL
+import java.nio.charset.StandardCharsets
 import java.util.Collections
+import kotlin.coroutines.coroutineContext
 
 /**
  * Low-latency Google Gemini client via Firebase AI Logic:
@@ -57,6 +66,8 @@ object GeminiAiService {
     private val REGEX_MULTI_WS = Regex("\\s+")
 
     private class FirstTokenTimeoutException : CancellationException("First token timed out")
+    private class PersonalApiKeyException(val code: Int, message: String) : Exception(message)
+    private class ModelUnavailableException(val code: Int, message: String) : Exception(message)
 
     private data class CachedAnswer(val response: AiResponse, val timestampMs: Long)
 
@@ -92,12 +103,18 @@ object GeminiAiService {
         val answerText: String = "",
         val spokenText: String = "",
         val errorMessage: String? = null,
-        val isAppCheckError: Boolean = false
+        val isAppCheckError: Boolean = false,
+        val isApiKeyError: Boolean = false
     )
+
+    fun clearCache() {
+        cache.clear()
+    }
 
     /** Pre-instantiates the default model on IO thread after configureAppCheck(). */
     fun warmup(context: Context) {
         try {
+            if (getPersonalGeminiApiKey(context) != null) return
             if (FirebaseApp.getApps(context).isNotEmpty()) {
                 viFastModel
             }
@@ -120,7 +137,9 @@ object GeminiAiService {
             )
         }
 
-        val cacheKey = "${if (isEnglish) "en" else "vi"}|${cleanQuery.lowercase()}"
+        val personalApiKey = getPersonalGeminiApiKey(context)
+        val cachePrefix = if (personalApiKey != null) "key:${personalApiKey.hashCode()}" else "fb"
+        val cacheKey = "$cachePrefix|${if (isEnglish) "en" else "vi"}|${cleanQuery.lowercase()}"
         if (!forceRefresh) {
             cache[cacheKey]?.let { entry ->
                 if (System.currentTimeMillis() - entry.timestampMs < CACHE_TTL_MS) {
@@ -128,6 +147,17 @@ object GeminiAiService {
                     return@withContext entry.response
                 }
             }
+        }
+
+        if (personalApiKey != null) {
+            return@withContext askWithPersonalApiKeyStreaming(
+                apiKey = personalApiKey,
+                cleanQuery = cleanQuery,
+                isEnglish = isEnglish,
+                cacheKey = cacheKey,
+                onStatus = onStatus,
+                onPartialText = onPartialText
+            )
         }
 
         try {
@@ -390,13 +420,291 @@ object GeminiAiService {
             append("\n")
             append(
                 if (isEnglish) {
-                    "If this TV box lacks Google Play Services or reCAPTCHA fails/hangs, press \"App Check\" below to enter a registered Firebase App Check Debug Token."
+                    "HTTP 403 \"App attestation failed\" happens on sideloaded/debug APKs on TV boxes. Tap \"Personal API Key\" below to use your own Gemini API key (no App Check required on TV Box), or open \"App Check\" / Google / YouTube."
                 } else {
-                    "Nếu TV không có Google Play Services hoặc reCAPTCHA bị treo/lỗi, bấm nút \"App Check\" bên dưới để xem/nhập mã Debug Token từ Firebase Console."
+                    "Lỗi 403 \"App attestation failed\" xảy ra trên APK cài ngoài TV Box. Hãy bấm \"API Key cá nhân\" bên dưới để dùng Gemini API Key của bạn (chạy thẳng trên TV Box không cần App Check), hoặc dùng Tìm Google / YouTube."
                 }
             )
         }
         return AiResponse(errorMessage = builtMsg, isAppCheckError = true)
+    }
+
+    private suspend fun askWithPersonalApiKeyStreaming(
+        apiKey: String,
+        cleanQuery: String,
+        isEnglish: Boolean,
+        cacheKey: String,
+        onStatus: (String) -> Unit,
+        onPartialText: (String) -> Unit
+    ): AiResponse {
+        try {
+            onStatus(if (isEnglish) "Asking Google AI (Personal Key)…" else "Google AI đang trả lời (Key cá nhân)…")
+            val fastAccumulated = StringBuilder()
+            val fastFailure: Exception? = try {
+                streamRestWithFirstTokenTimeout(
+                    apiKey = apiKey,
+                    modelName = FAST_MODEL,
+                    thinkingLevel = "MINIMAL",
+                    query = cleanQuery,
+                    isEnglish = isEnglish,
+                    firstTokenTimeoutMs = 9_000L,
+                    totalTimeoutMs = 24_000L,
+                    accumulated = fastAccumulated,
+                    onPartialText = onPartialText
+                )
+                null
+            } catch (e: PersonalApiKeyException) {
+                return buildPersonalApiKeyErrorResponse(e.message, isEnglish)
+            } catch (e: FirstTokenTimeoutException) {
+                Log.w(TAG, "Personal key $FAST_MODEL first-token timeout; falling back to $STANDARD_MODEL.")
+                e
+            } catch (e: ModelUnavailableException) {
+                Log.w(TAG, "Personal key $FAST_MODEL unavailable (${e.code}); falling back to $STANDARD_MODEL.")
+                e
+            } catch (e: TimeoutCancellationException) {
+                if (fastAccumulated.isNotBlank()) null else e
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "Personal key $FAST_MODEL failed: ${e.message}", e)
+                if (fastAccumulated.isNotBlank()) null else e
+            }
+
+            if (fastFailure == null && fastAccumulated.isNotBlank()) {
+                return finalizeSuccess(fastAccumulated.toString(), isEnglish).also { res ->
+                    if (res.errorMessage == null) cache[cacheKey] = CachedAnswer(res, System.currentTimeMillis())
+                }
+            }
+
+            onStatus(if (isEnglish) "Switching AI route…" else "Đang thử tuyến AI dự phòng…")
+            val fallbackAccumulated = StringBuilder()
+            try {
+                streamRestWithFirstTokenTimeout(
+                    apiKey = apiKey,
+                    modelName = STANDARD_MODEL,
+                    thinkingLevel = "LOW",
+                    query = cleanQuery,
+                    isEnglish = isEnglish,
+                    firstTokenTimeoutMs = 14_000L,
+                    totalTimeoutMs = 24_000L,
+                    accumulated = fallbackAccumulated,
+                    onPartialText = onPartialText
+                )
+            } catch (e: PersonalApiKeyException) {
+                return buildPersonalApiKeyErrorResponse(e.message, isEnglish)
+            } catch (_: FirstTokenTimeoutException) {
+                return timeoutErrorResponse(isEnglish)
+            } catch (e: TimeoutCancellationException) {
+                if (fallbackAccumulated.isBlank()) return timeoutErrorResponse(isEnglish)
+            }
+
+            if (fallbackAccumulated.isNotBlank()) {
+                return finalizeSuccess(fallbackAccumulated.toString(), isEnglish).also { res ->
+                    if (res.errorMessage == null) cache[cacheKey] = CachedAnswer(res, System.currentTimeMillis())
+                }
+            }
+
+            if (fastFailure != null && fastFailure !is FirstTokenTimeoutException && fastFailure !is TimeoutCancellationException) {
+                throw fastFailure
+            }
+
+            return AiResponse(
+                errorMessage = if (isEnglish) {
+                    "Google AI returned an empty response."
+                } else {
+                    "Google AI chưa có câu trả lời cho nội dung này."
+                }
+            )
+        } catch (e: TimeoutCancellationException) {
+            return timeoutErrorResponse(isEnglish)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: PersonalApiKeyException) {
+            return buildPersonalApiKeyErrorResponse(e.message, isEnglish)
+        } catch (e: Exception) {
+            Log.e(TAG, "Personal Gemini API key request failed", e)
+            val msg = e.localizedMessage?.takeIf { it.isNotBlank() }
+            return AiResponse(
+                errorMessage = msg ?: if (isEnglish) {
+                    "Could not connect to Google AI with personal API key."
+                } else {
+                    "Không kết nối được Google AI bằng API Key cá nhân."
+                }
+            )
+        }
+    }
+
+    private suspend fun streamRestWithFirstTokenTimeout(
+        apiKey: String,
+        modelName: String,
+        thinkingLevel: String,
+        query: String,
+        isEnglish: Boolean,
+        firstTokenTimeoutMs: Long,
+        totalTimeoutMs: Long,
+        accumulated: StringBuilder,
+        onPartialText: (String) -> Unit
+    ) {
+        withTimeout(totalTimeoutMs) {
+            coroutineScope {
+                var gotFirstText = false
+                var activeConn: HttpURLConnection? = null
+                val watchdog = launch {
+                    delay(firstTokenTimeoutMs)
+                    if (!gotFirstText) {
+                        try {
+                            activeConn?.disconnect()
+                        } catch (_: Exception) {
+                        }
+                        this@coroutineScope.cancel(FirstTokenTimeoutException())
+                    }
+                }
+                try {
+                    val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:streamGenerateContent?alt=sse"
+                    val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                        requestMethod = "POST"
+                        connectTimeout = 8_000
+                        readTimeout = 15_000
+                        doOutput = true
+                        setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                        setRequestProperty("Accept", "text/event-stream")
+                        setRequestProperty("x-goog-api-key", apiKey)
+                    }
+                    activeConn = conn
+
+                    val body = JSONObject().apply {
+                        put(
+                            "systemInstruction",
+                            JSONObject().put(
+                                "parts",
+                                JSONArray().put(JSONObject().put("text", if (isEnglish) EN_SYSTEM_PROMPT else VI_SYSTEM_PROMPT))
+                            )
+                        )
+                        put(
+                            "contents",
+                            JSONArray().put(
+                                JSONObject()
+                                    .put("role", "user")
+                                    .put("parts", JSONArray().put(JSONObject().put("text", query)))
+                            )
+                        )
+                        put(
+                            "generationConfig",
+                            JSONObject()
+                                .put("maxOutputTokens", 320)
+                                .put("thinkingConfig", JSONObject().put("thinkingLevel", thinkingLevel))
+                        )
+                    }.toString()
+
+                    try {
+                        conn.outputStream.use { out ->
+                            out.write(body.toByteArray(StandardCharsets.UTF_8))
+                        }
+
+                        val code = conn.responseCode
+                        if (code !in 200..299) {
+                            val errBody = try {
+                                (conn.errorStream ?: conn.inputStream)?.bufferedReader(StandardCharsets.UTF_8)?.use { it.readText() }.orEmpty()
+                            } catch (_: Exception) {
+                                ""
+                            }
+                            val parsedErr = extractGoogleApiErrorMessage(errBody) ?: "HTTP $code"
+                            val lower = "$errBody $parsedErr".lowercase()
+                            val looksLikeKeyAuthIssue = code == 401 || code == 403 ||
+                                (code == 400 && (lower.contains("api key") || lower.contains("api_key")))
+                            if (looksLikeKeyAuthIssue) {
+                                throw PersonalApiKeyException(code, parsedErr)
+                            }
+                            if (code == 404 || code == 400 || code == 429) {
+                                throw ModelUnavailableException(code, parsedErr)
+                            }
+                            throw IllegalStateException(parsedErr)
+                        }
+
+                        var lastEmitMs = 0L
+                        BufferedReader(InputStreamReader(conn.inputStream, StandardCharsets.UTF_8)).use { reader ->
+                            while (true) {
+                                coroutineContext.ensureActive()
+                                val line = reader.readLine() ?: break
+                                if (!line.startsWith("data:")) continue
+                                val payload = line.removePrefix("data:").trim()
+                                if (payload.isEmpty() || payload == "[DONE]") continue
+                                val piece = extractTextFromSseJson(payload)
+                                if (piece.isNotEmpty()) {
+                                    val first = !gotFirstText
+                                    if (first) {
+                                        gotFirstText = true
+                                        watchdog.cancel()
+                                    }
+                                    accumulated.append(piece)
+                                    val now = System.currentTimeMillis()
+                                    if (first || now - lastEmitMs >= 45L) {
+                                        lastEmitMs = now
+                                        onPartialText(cleanForTvDisplay(accumulated.toString()))
+                                    }
+                                }
+                            }
+                        }
+                    } finally {
+                        activeConn = null
+                        try {
+                            conn.disconnect()
+                        } catch (_: Exception) {
+                        }
+                    }
+                } finally {
+                    watchdog.cancel()
+                }
+            }
+        }
+    }
+
+    private fun extractTextFromSseJson(payload: String): String {
+        return try {
+            val root = JSONObject(payload)
+            val candidates = root.optJSONArray("candidates") ?: return ""
+            if (candidates.length() == 0) return ""
+            val content = candidates.optJSONObject(0)?.optJSONObject("content") ?: return ""
+            val parts = content.optJSONArray("parts") ?: return ""
+            val sb = StringBuilder()
+            for (i in 0 until parts.length()) {
+                val p = parts.optJSONObject(i) ?: continue
+                if (p.optBoolean("thought", false)) continue
+                val t = p.optString("text", "")
+                if (t.isNotEmpty()) sb.append(t)
+            }
+            sb.toString()
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    private fun extractGoogleApiErrorMessage(errBody: String): String? {
+        if (errBody.isBlank()) return null
+        return try {
+            val errObj = JSONObject(errBody).optJSONObject("error")
+            errObj?.optString("message")?.takeIf { it.isNotBlank() }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun buildPersonalApiKeyErrorResponse(rawDetail: String?, isEnglish: Boolean): AiResponse {
+        val detail = rawDetail?.takeIf { it.isNotBlank() }.orEmpty()
+        val msg = buildString {
+            if (detail.isNotEmpty()) {
+                append(detail)
+                append("\n\n")
+            }
+            append(
+                if (isEnglish) {
+                    "Your personal Gemini API key was rejected or lacks permission. Tap \"Personal API Key\" below to update or scan QR from your phone."
+                } else {
+                    "Gemini API Key cá nhân chưa hợp lệ hoặc bị giới hạn quyền. Hãy bấm \"API Key cá nhân\" bên dưới để sửa hoặc quét QR gửi lại từ điện thoại."
+                }
+            )
+        }
+        return AiResponse(errorMessage = msg, isApiKeyError = true)
     }
 
     private fun cleanForTvDisplay(text: String): String {

@@ -5,12 +5,11 @@ import android.view.KeyEvent as AndroidKeyEvent
 import androidx.compose.animation.animateColor
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -248,7 +247,7 @@ fun LedFocusTile(
 
     val scale by animateFloatAsState(
         targetValue = if (focused) focusScale else 1f,
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        animationSpec = tween(durationMillis = 150),
         label = "tile_scale"
     )
     val ledColor = rememberLedBorderColor(focused)
@@ -325,7 +324,7 @@ fun GlassPill(
     var isFocused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
         targetValue = if (isFocused) 1.07f else 1f,
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        animationSpec = tween(durationMillis = 150),
         label = "pill_scale"
     )
     val accent = LauncherColors.accent(theme)

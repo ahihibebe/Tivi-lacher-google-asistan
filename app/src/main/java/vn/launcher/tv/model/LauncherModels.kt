@@ -205,9 +205,12 @@ sealed interface ActiveDialog {
         val statusText: String = "",
         val loading: Boolean = true,
         val errorMessage: String? = null,
-        val isAppCheckError: Boolean = false
+        val isAppCheckError: Boolean = false,
+        val isApiKeyError: Boolean = false
     ) : ActiveDialog
     data class AppCheckConfig(val returnQuery: String?) : ActiveDialog
+    data class PersonalAiKeyConfig(val returnQuery: String?) : ActiveDialog
+    data class QrApiKeyUpload(val url: String, val qrBitmap: Bitmap?, val returnQuery: String?) : ActiveDialog
     data object DisplayMenu : ActiveDialog
     data object ChooseProvince : ActiveDialog
     data class ChooseWard(
@@ -269,7 +272,9 @@ data class LauncherUiState(
     val wxWardLabel: String = "—",
     val volumeLevel: Int = 0,
     val volumeMax: Int = 15,
-    val localIp: String? = null
+    val localIp: String? = null,
+    val hasPersonalAiKey: Boolean = false,
+    val maskedPersonalAiKey: String = ""
 ) {
     val isEnglish: Boolean get() = lang == "en"
 }

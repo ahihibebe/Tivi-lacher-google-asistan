@@ -32,6 +32,7 @@ import androidx.compose.material.icons.automirrored.filled.VolumeDown
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Image
@@ -118,6 +119,13 @@ fun ActiveDialogHost(
         ActiveDialog.WallpaperMenu -> WallpaperMenuDialog(state, vm, onPickDeviceImage)
         ActiveDialog.WallpaperOpacity -> WallpaperOpacityDialog(state, vm)
         is ActiveDialog.QrUpload -> QrUploadDialog(dialog, state.theme, en, vm::closeDialog)
+        is ActiveDialog.QrApiKeyUpload -> QrApiKeyUploadDialog(
+            dialog = dialog,
+            theme = state.theme,
+            en = en,
+            onBack = { vm.openPersonalAiKeyConfig(dialog.returnQuery) },
+            onDismiss = vm::closeDialog
+        )
         is ActiveDialog.LocalWallpapers -> LocalWallpapersDialog(dialog, state.theme, en, vm)
         ActiveDialog.LanguageMenu -> LanguageMenuDialog(state, vm)
         ActiveDialog.EditUserName -> MacEditDialog(
@@ -324,6 +332,17 @@ private fun SettingsMainDialog(state: LauncherUiState, vm: LauncherViewModel) {
         )
 
         MacSectionHeader(if (en) "More" else "Khác")
+        MacRow(
+            title = if (en) "Google AI · Personal API Key" else "Trợ lý AI · API Key cá nhân",
+            theme = state.theme,
+            icon = Icons.Filled.AutoAwesome,
+            iconTintBg = palette[2],
+            trailing = if (state.hasPersonalAiKey) state.maskedPersonalAiKey else (if (en) "Not set" else "Chưa nhập"),
+            showChevron = true,
+            testTag = "settings_ai_key_row",
+            onFocused = vm::playMove,
+            onClick = { vm.openPersonalAiKeyConfig(null) }
+        )
         MacRow(
             title = if (en) "Prices (gold, coffee, pepper, fuel)" else "Bảng giá (vàng, cà phê, tiêu, xăng dầu)",
             theme = state.theme,
@@ -895,6 +914,71 @@ private fun QrUploadDialog(
                 color = LauncherColors.accent(theme),
                 onClick = onDismiss
             )
+        }
+    }
+}
+
+@Composable
+private fun QrApiKeyUploadDialog(
+    dialog: ActiveDialog.QrApiKeyUpload,
+    theme: LauncherTheme,
+    en: Boolean,
+    onBack: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    MacWindowDialog(
+        title = if (en) "Send Gemini API Key from Phone" else "Quét QR nhập API Key từ điện thoại",
+        theme = theme,
+        maxWidth = 490.dp,
+        onDismiss = onDismiss
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            if (dialog.qrBitmap != null) {
+                Box(
+                    modifier = Modifier
+                        .size(240.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color.White)
+                        .padding(10.dp)
+                ) {
+                    Image(
+                        bitmap = dialog.qrBitmap.asImageBitmap(),
+                        contentDescription = "QR Code",
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            Text(
+                text = if (en) {
+                    "Scan with your phone (same Wi-Fi as the TV), paste your Gemini API key from aistudio.google.com/apikey and tap Send."
+                } else {
+                    "Dùng điện thoại (cùng Wi-Fi với TV) quét mã, dán Gemini API Key lấy từ aistudio.google.com/apikey rồi bấm Gửi lên TV."
+                },
+                color = Color(0xE6FFFFFF),
+                fontSize = 13.sp,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(text = dialog.url, color = Color(0x99FFFFFF), fontSize = 11.sp, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(14.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                MacActionButton(
+                    text = if (en) "Enter on TV" else "Nhập trên TV",
+                    color = Color(0x33FFFFFF),
+                    onClick = onBack
+                )
+                MacActionButton(
+                    text = if (en) "Close" else "Đóng",
+                    color = LauncherColors.accent(theme),
+                    onClick = onDismiss
+                )
+            }
         }
     }
 }

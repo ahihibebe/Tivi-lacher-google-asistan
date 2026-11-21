@@ -104,6 +104,9 @@ import vn.launcher.tv.data.currentAppCheckMode
 import vn.launcher.tv.data.generateDebugUuidCandidate
 import vn.launcher.tv.data.getActiveDebugSecret
 import vn.launcher.tv.data.getCustomDebugToken
+import vn.launcher.tv.data.getFirebaseAppId
+import vn.launcher.tv.data.getPersonalGeminiApiKey
+import vn.launcher.tv.data.maskGeminiApiKey
 import vn.launcher.tv.model.ActiveDialog
 import vn.launcher.tv.model.LauncherUiState
 import vn.launcher.tv.model.PriceKind
@@ -826,6 +829,7 @@ fun SecondaryDialogHost(
             }
         }
 
+        is ActiveDialog.PersonalAiKeyConfig -> PersonalAiKeyDialog(dialog, state, vm)
         is ActiveDialog.SpeechPopup -> {
             MacWindowDialog(title = dialog.title, theme = state.theme, maxWidth = 520.dp, onDismiss = vm::closeDialog) {
                 Text(dialog.message, color = Color(0xE6FFFFFF), fontSize = 14.sp, modifier = Modifier.padding(8.dp))
@@ -1664,10 +1668,17 @@ private fun AiAnswerBoardDialog(
             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            if (!dialog.errorMessage.isNullOrBlank() && (dialog.isAppCheckError || dialog.isApiKeyError)) {
+                MacActionButton(
+                    text = if (en) "Personal API Key" else "API Key cá nhân",
+                    color = Color(0x66FF9F0A),
+                    onClick = { vm.openPersonalAiKeyConfig(dialog.query) }
+                )
+            }
             if (!dialog.errorMessage.isNullOrBlank() && dialog.isAppCheckError) {
                 MacActionButton(
                     text = "App Check",
-                    color = Color(0x55FF9F0A),
+                    color = Color(0x33FF9F0A),
                     onClick = { vm.openAppCheckConfig(dialog.query) }
                 )
             }
@@ -1725,13 +1736,14 @@ private fun AppCheckConfigDialog(
         }
     }
 
+    val firebaseAppId = remember { getFirebaseAppId(context).orEmpty() }
     MacWindowDialog(
         title = if (en) "Firebase App Check Config" else "Cấu hình Firebase App Check",
         theme = state.theme,
         maxWidth = 640.dp,
         onDismiss = {
             if (!dialog.returnQuery.isNullOrBlank()) {
-                vm.askGoogleAi(dialog.returnQuery)
+                vm.askGoogleAi(dialog.returnQuery, forceRefresh = true)
             } else {
                 vm.closeDialog()
             }
@@ -1739,11 +1751,15 @@ private fun AppCheckConfigDialog(
     ) {
         Text(
             text = if (en) {
-                "Package: ${context.packageName}\nCurrent mode: $modeLabel\n\n" +
-                    "On Android TV boxes without Google Play Services (or Debug APKs), register a Debug Token UUID in Firebase Console → App Check → Apps → Manage debug tokens, then enter that exact UUID below."
+                "Package: ${context.packageName}\n" +
+                    (if (firebaseAppId.isNotEmpty()) "Firebase App ID: $firebaseAppId\n" else "") +
+                    "Current mode: $modeLabel\n\n" +
+                    "Important: A random UUID created on the TV will fail with 403 unless you also add that exact UUID under Firebase Console → App Check → Apps → Manage debug tokens (using your own Firebase project's google-services.json)."
             } else {
-                "Gói ứng dụng: ${context.packageName}\nChế độ hiện tại: $modeLabel\n\n" +
-                    "Trên TV Box không có Google Play Services (hoặc bản Debug APK), hãy đăng ký mã Debug Token (UUID) trong Firebase Console → App Check → Apps → Manage debug tokens rồi nhập đúng mã đó vào ô dưới."
+                "Gói ứng dụng: ${context.packageName}\n" +
+                    (if (firebaseAppId.isNotEmpty()) "Firebase App ID: $firebaseAppId\n" else "") +
+                    "Chế độ hiện tại: $modeLabel\n\n" +
+                    "Lưu ý quan trọng: Chỉ bấm tạo UUID trên TV sẽ luôn báo lỗi 403 nếu mã UUID đó chưa được dán và lưu trong Firebase Console → App Check → Apps → Manage debug tokens (của đúng project Firebase trong google-services.json)."
             },
             color = Color(0xCCFFFFFF),
             fontSize = 13.sp,
@@ -1756,7 +1772,7 @@ private fun AppCheckConfigDialog(
             value = tokenInput,
             onValueChange = { tokenInput = it },
             label = {
-                Text(if (en) "App Check Debug Token (UUID)" else "Mã Debug Token (UUID)")
+                Text(if (en) "Registered App Check Debug Token (UUID)" else "Mã Debug Token đã đăng ký trên Firebase (UUID)")
             },
             singleLine = true,
             colors = OutlinedTextFieldDefaults.colors(
@@ -1778,7 +1794,7 @@ private fun AppCheckConfigDialog(
             verticalAlignment = Alignment.CenterVertically
         ) {
             MacActionButton(
-                text = if (en) "Generate UUID" else "Tạo UUID",
+                text = if (en) "New UUID" else "Tạo UUID mới",
                 color = Color(0x33FFFFFF),
                 onClick = { tokenInput = generateDebugUuidCandidate() }
             )
@@ -1791,6 +1807,104 @@ private fun AppCheckConfigDialog(
                 text = if (en) "Save & Retry" else "Lưu & Thử lại",
                 color = accent,
                 onClick = { vm.saveAppCheckDebugToken(tokenInput, dialog.returnQuery) }
+            )
+            MacActionButton(
+                text = if (en) "Close" else "Đóng",
+                color = Color(0x28FFFFFF),
+                onClick = vm::closeDialog
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PersonalAiKeyDialog(
+    dialog: ActiveDialog.PersonalAiKeyConfig,
+    state: LauncherUiState,
+    vm: LauncherViewModel
+) {
+    val context = LocalContext.current
+    val en = state.isEnglish
+    val accent = LauncherColors.accent(state.theme)
+    val savedKey = remember { getPersonalGeminiApiKey(context).orEmpty() }
+    var keyInput by remember { mutableStateOf(savedKey) }
+    val maskedSaved = remember(savedKey) { maskGeminiApiKey(savedKey) }
+
+    MacWindowDialog(
+        title = if (en) "Personal Gemini API Key" else "Gemini API Key cá nhân",
+        theme = state.theme,
+        maxWidth = 650.dp,
+        onDismiss = vm::closeDialog
+    ) {
+        Text(
+            text = if (en) {
+                val status = if (savedKey.isNotEmpty()) {
+                    "Active key: $maskedSaved (bypasses Firebase App Check on TV Box)"
+                } else {
+                    "No personal key saved yet (currently using Firebase App Check)."
+                }
+                "$status\n\nGet a free Gemini API key at aistudio.google.com/apikey, then scan QR from your phone or paste it below. Stored locally on this TV only."
+            } else {
+                val status = if (savedKey.isNotEmpty()) {
+                    "Đang dùng key cá nhân: $maskedSaved (chạy thẳng trên TV Box không cần App Check)"
+                } else {
+                    "Chưa nhập API Key cá nhân (hiện đang dùng Firebase App Check)."
+                }
+                "$status\n\nLấy key miễn phí tại aistudio.google.com/apikey, sau đó bấm \"Quét QR nhập từ ĐT\" để dán nhanh từ điện thoại hoặc nhập trực tiếp bên dưới."
+            },
+            color = Color(0xD9FFFFFF),
+            fontSize = 13.sp,
+            lineHeight = 19.sp
+        )
+
+        Spacer(Modifier.height(10.dp))
+
+        OutlinedTextField(
+            value = keyInput,
+            onValueChange = { keyInput = it },
+            label = {
+                Text(if (en) "Gemini API Key (AIza...)" else "Mã Gemini API Key (AIza...)")
+            },
+            singleLine = true,
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White,
+                focusedBorderColor = accent,
+                unfocusedBorderColor = Color(0x44FFFFFF),
+                focusedLabelColor = accent,
+                unfocusedLabelColor = Color(0x99FFFFFF)
+            ),
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(Modifier.height(14.dp))
+
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            MacActionButton(
+                text = if (en) "QR from Phone" else "Quét QR nhập từ ĐT",
+                color = Color(0x5530D158),
+                onClick = { vm.startApiKeyQrUpload(dialog.returnQuery) }
+            )
+            if (savedKey.isNotEmpty() || keyInput.isNotBlank()) {
+                MacActionButton(
+                    text = if (en) "Clear Key" else "Xóa key",
+                    color = Color(0x44FF453A),
+                    onClick = { vm.savePersonalGeminiApiKeyInput(null, dialog.returnQuery) }
+                )
+            }
+            MacActionButton(
+                text = if (!dialog.returnQuery.isNullOrBlank()) {
+                    if (en) "Save & Retry" else "Lưu & Thử lại"
+                } else {
+                    if (en) "Save" else "Lưu"
+                },
+                color = accent,
+                onClick = { vm.savePersonalGeminiApiKeyInput(keyInput, dialog.returnQuery) }
             )
             MacActionButton(
                 text = if (en) "Close" else "Đóng",

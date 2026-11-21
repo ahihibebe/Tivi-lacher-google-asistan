@@ -59,6 +59,9 @@ import vn.launcher.tv.data.AdminData
 import vn.launcher.tv.data.CrashGuard
 import vn.launcher.tv.data.GeminiAiService
 import vn.launcher.tv.data.Holidays
+import vn.launcher.tv.data.getPersonalGeminiApiKey
+import vn.launcher.tv.data.maskGeminiApiKey
+import vn.launcher.tv.data.savePersonalGeminiApiKey
 import vn.launcher.tv.data.LunarCalendar
 import vn.launcher.tv.data.MediaLibrary
 import vn.launcher.tv.data.PriceRepository
@@ -234,7 +237,9 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                 bluetoothStatus = readBluetoothStatus(lang == "en"),
                 volumeLevel = volCur,
                 volumeMax = volMax,
-                localIp = localIp()
+                localIp = localIp(),
+                hasPersonalAiKey = getPersonalGeminiApiKey(app) != null,
+                maskedPersonalAiKey = maskGeminiApiKey(getPersonalGeminiApiKey(app))
             )
         }
     }
@@ -1360,9 +1365,90 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun startApiKeyQrUpload(returnQuery: String? = null) {
+        val ip = lanIp()
+        if (ip == null) {
+            toast(tr("TV chưa kết nối mạng", "The TV is not connected to a network"))
+            return
+        }
+        stopUploadServer()
+        val rnd = ByteArray(9).also { SecureRandom().nextBytes(it) }
+        val token = rnd.joinToString("") { String.format(Locale.US, "%02x", it) }
+        val page = buildApiKeyUploadPage(token)
+        try {
+            val srv = UploadServer(token, page) { data ->
+                val receivedKey = String(data, Charsets.UTF_8).trim()
+                if (receivedKey.isNotEmpty()) {
+                    viewModelScope.launch {
+                        stopUploadServer()
+                        savePersonalGeminiApiKeyInput(receivedKey, returnQuery)
+                    }
+                }
+            }
+            val port = srv.start()
+            uploadServer = srv
+            val url = "http://$ip:$port/$token"
+            val qrBitmap = makeQr(url, 480)
+            _uiState.update { it.copy(activeDialog = ActiveDialog.QrApiKeyUpload(url, qrBitmap, returnQuery)) }
+        } catch (_: Exception) {
+            stopUploadServer()
+            toast(tr("Không mở được cổng nhận API Key", "Could not open the API key upload port"))
+        }
+    }
+
     private fun stopUploadServer() {
         uploadServer?.stop()
         uploadServer = null
+    }
+
+    private fun buildApiKeyUploadPage(token: String): String {
+        val title = tr("Nhập Gemini API Key cho TV", "Send Gemini API Key to TV")
+        val hint = tr(
+            "Lấy key miễn phí tại aistudio.google.com/apikey, dán vào ô dưới rồi bấm Gửi.",
+            "Get a key at aistudio.google.com/apikey, paste it below and tap Send."
+        )
+        val placeholder = "AIzaSy..."
+        val btn = tr("Gửi lên TV", "Send to TV")
+        val emptyMsg = tr("Hãy dán Gemini API Key trước", "Please paste your Gemini API key first")
+        val doneMsg = tr("Đã gửi thành công! Xem trên màn hình TV.", "Sent! Check your TV screen.")
+        val errMsg = tr("Gửi thất bại, hãy thử lại.", "Failed, please try again.")
+        return """
+            <!DOCTYPE html>
+            <html><head><meta charset="utf-8">
+            <meta name="viewport" content="width=device-width,initial-scale=1">
+            <title>$title</title>
+            <style>
+            body{font-family:-apple-system,Helvetica,Arial,sans-serif;background:#1c1c1e;color:#fff;margin:0;padding:24px;text-align:center}
+            h1{font-size:20px;margin-bottom:8px}
+            p{color:#c7c7cc;font-size:14px;line-height:1.5}
+            a{color:#64d2ff}
+            input{width:100%;max-width:420px;box-sizing:border-box;margin-top:14px;padding:14px;border-radius:12px;border:1px solid #48484a;background:#2c2c2e;color:#fff;font-size:15px}
+            button{background:#0a84ff;color:#fff;border:0;border-radius:12px;font-size:17px;padding:14px 28px;margin-top:16px;width:100%;max-width:420px}
+            #s{margin-top:16px;font-size:15px;color:#30d158}
+            </style></head><body>
+            <h1>$title</h1>
+            <p>$hint<br><a href="https://aistudio.google.com/apikey" target="_blank">aistudio.google.com/apikey</a></p>
+            <input type="text" id="k" placeholder="$placeholder" autocomplete="off" autocapitalize="off" spellcheck="false">
+            <button onclick="send()">$btn</button>
+            <div id="s"></div>
+            <script>
+            function send(){
+              var v=document.getElementById('k').value.trim();
+              if(v.length<12){alert('$emptyMsg');return;}
+              var s=document.getElementById('s');
+              s.innerText='...';
+              var r=new XMLHttpRequest();
+              r.open('POST','/$token/up');
+              r.setRequestHeader('Content-Type','text/plain;charset=UTF-8');
+              r.onload=function(){
+                if(r.status==200){s.style.color='#30d158';s.innerText='$doneMsg';}
+                else{s.style.color='#ff453a';s.innerText='$errMsg';}
+              };
+              r.onerror=function(){s.style.color='#ff453a';s.innerText='$errMsg';};
+              r.send(v);
+            }
+            </script></body></html>
+        """.trimIndent()
     }
 
     private fun buildUploadPage(token: String): String {
@@ -2130,7 +2216,8 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                             spokenText = res.spokenText,
                             loading = false,
                             errorMessage = res.errorMessage,
-                            isAppCheckError = res.isAppCheckError
+                            isAppCheckError = res.isAppCheckError,
+                            isApiKeyError = res.isApiKeyError
                         )
                     )
                 }
@@ -2138,6 +2225,35 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                     speak(res.spokenText)
                 }
             }
+        }
+    }
+
+    fun openPersonalAiKeyConfig(returnQuery: String? = null) {
+        playSelect()
+        _uiState.update { it.copy(activeDialog = ActiveDialog.PersonalAiKeyConfig(returnQuery = returnQuery)) }
+    }
+
+    fun savePersonalGeminiApiKeyInput(rawKey: String?, returnQuery: String? = null) {
+        val cleaned = rawKey?.trim()?.takeIf { it.isNotEmpty() }
+        savePersonalGeminiApiKey(app, cleaned)
+        GeminiAiService.clearCache()
+        _uiState.update {
+            it.copy(
+                hasPersonalAiKey = cleaned != null,
+                maskedPersonalAiKey = maskGeminiApiKey(cleaned)
+            )
+        }
+        toast(
+            if (cleaned == null) {
+                tr("Đã xóa API Key cá nhân (quay về App Check)", "Removed personal API key (reverted to App Check)")
+            } else {
+                tr("Đã lưu Gemini API Key cá nhân", "Saved personal Gemini API key")
+            }
+        )
+        if (!returnQuery.isNullOrBlank() && cleaned != null) {
+            askGoogleAi(returnQuery, forceRefresh = true)
+        } else {
+            closeDialog()
         }
     }
 
