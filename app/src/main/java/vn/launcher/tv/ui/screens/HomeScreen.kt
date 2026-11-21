@@ -78,6 +78,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import vn.launcher.tv.R
 import vn.launcher.tv.data.WeatherService
@@ -88,6 +89,7 @@ import vn.launcher.tv.model.LauncherUiState
 import vn.launcher.tv.ui.components.GlassPill
 import vn.launcher.tv.ui.components.LedFocusTile
 import vn.launcher.tv.ui.components.barSurfaceBrush
+import vn.launcher.tv.ui.components.tvDialogClickable
 import vn.launcher.tv.ui.theme.LauncherColors
 import java.io.File
 import java.util.Locale
@@ -114,6 +116,7 @@ fun HomeScreen(
 ) {
     val scope = rememberCoroutineScope()
     val firstDockFocus = remember { FocusRequester() }
+    val settingsPillFocus = remember { FocusRequester() }
     val en = state.isEnglish
 
     LaunchedEffect(state.dockApps.firstOrNull()?.pkg) {
@@ -440,6 +443,7 @@ fun HomeScreen(
                                 }
 
                                 GlassPill(
+                                    modifier = Modifier.focusRequester(settingsPillFocus),
                                     theme = state.theme,
                                     testTag = "pill_settings",
                                     onFocused = onMoveSound,
@@ -703,25 +707,40 @@ fun HomeScreen(
                         onFocused = onMoveSound,
                         onClick = {
                             scope.launch {
-                                scrollState.animateScrollTo(0)
-                                try {
+                                val movedToDock = try {
                                     firstDockFocus.requestFocus()
+                                    true
                                 } catch (_: Exception) {
+                                    false
+                                }
+                                if (!movedToDock) {
+                                    try {
+                                        settingsPillFocus.requestFocus()
+                                    } catch (_: Exception) {
+                                    }
+                                }
+                                delay(40L)
+                                try {
+                                    scrollState.animateScrollTo(0)
+                                } finally {
+                                    if (scrollState.value > 0) {
+                                        scrollState.scrollTo(0)
+                                    }
                                 }
                             }
                         }
                     ) {
                         Box(
                             modifier = Modifier
-                                .width(64.dp)
-                                .height(32.dp),
+                                .width(72.dp)
+                                .height(48.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Filled.KeyboardArrowUp,
                                 contentDescription = if (en) "Back to top" else "Lên đầu trang",
                                 tint = Color.White,
-                                modifier = Modifier.size(22.dp)
+                                modifier = Modifier.size(24.dp)
                             )
                         }
                     }
@@ -936,8 +955,11 @@ private fun DockTabDot(
                 color = Color.White,
                 shape = CircleShape
             )
-            .onFocusChanged { focused = it.isFocused }
-            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
+            .tvDialogClickable(
+                interactionSource = interactionSource,
+                onFocusStateChanged = { focused = it },
+                onClick = onClick
+            )
     )
 }
 

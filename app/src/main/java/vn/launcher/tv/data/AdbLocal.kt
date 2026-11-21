@@ -18,10 +18,19 @@ object AdbLocal {
             AdbKeyPair.generate(priv, pub)
         }
         val keyPair = AdbKeyPair.read(priv, pub)
-        val dadb = Dadb.create("localhost", 5555, keyPair)
-        return dadb.use { client ->
-            val resp = client.shell(command)
-            resp.output
+        val hosts = listOf("127.0.0.1", "localhost")
+        var lastConnErr: Exception? = null
+        for (host in hosts) {
+            try {
+                return Dadb.create(host, 5555, keyPair).use { client ->
+                    client.shell(command).output
+                }
+            } catch (e: java.net.ConnectException) {
+                lastConnErr = e
+            } catch (e: java.net.UnknownHostException) {
+                lastConnErr = e
+            }
         }
+        throw lastConnErr ?: java.net.ConnectException("Unable to connect to local ADB on port 5555")
     }
 }

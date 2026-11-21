@@ -1447,15 +1447,39 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     fun powerOff() {
         closeDialog()
         toast(tr("Đang tắt nguồn TV…", "Shutting down TV…"))
-        val shutdownCmd = "(svc power shutdown 2>/dev/null) || (reboot -p 2>/dev/null) || (setprop sys.powerctl shutdown 2>/dev/null) || input keyevent --longpress 26"
-        adbRun(shutdownCmd) { _, err ->
+        val shutdownCmd = "try_am(){ OUT=\$(am start -a \"\$1\" --ez android.intent.extra.KEY_CONFIRM false --ez android.intent.extra.USER_REQUESTED_SHUTDOWN true 2>&1); if echo \"\$OUT\" | grep -qi -e error -e exception -e unable -e denied -e denial -e permitted -e fail; then return 1; fi; echo \"\$OUT\"; return 0; }; " +
+            "try_am com.android.internal.intent.action.REQUEST_SHUTDOWN || " +
+            "try_am android.intent.action.ACTION_REQUEST_SHUTDOWN || " +
+            "reboot -p 2>/dev/null || " +
+            "(setprop sys.powerctl shutdown 2>/dev/null && [ \"\$(getprop sys.powerctl)\" = \"shutdown\" ]) || " +
+            "su -c \"reboot -p\" 2>/dev/null || " +
+            "input keyevent --longpress 26 || " +
+            "echo \"ERR:shutdown_failed\""
+        adbRun(shutdownCmd) { out, err ->
             if (err != null) {
                 val msgLower = err.lowercase()
                 // Ignore connection drop caused by the TV actually powering off mid-command
                 val poweredOffMidStream = msgLower.contains("eof") || msgLower.contains("broken pipe") || msgLower.contains("reset")
                 if (!poweredOffMidStream) {
-                    toast(tr("Cần bật ADB nội bộ để tắt TV: ", "Local ADB is needed to turn off the TV: ") + err)
+                    val en = _uiState.value.isEnglish
+                    openDialog(
+                        ActiveDialog.AdbHelp(
+                            title = if (en) "Enable local ADB to turn off TV" else "Bật ADB nội bộ để tắt TV",
+                            intro = if (en) {
+                                "Could not connect to the TV's local ADB ($err).\n\n" +
+                                    "1. Enable Developer options → USB debugging & Network debugging on the TV.\n" +
+                                    "2. On Android 11+, run the command below once from a computer (until reboot), then accept \"Always allow\" on the TV."
+                            } else {
+                                "Không kết nối được ADB nội bộ trên TV ($err).\n\n" +
+                                    "1. Bật Tùy chọn nhà phát triển → Gỡ lỗi USB & Gỡ lỗi qua mạng trên TV.\n" +
+                                    "2. Với Android 11+, chạy lệnh dưới đây 1 lần từ máy tính rồi chọn \"Luôn cho phép\" trên TV."
+                            },
+                            command = "adb tcpip 5555"
+                        )
+                    )
                 }
+            } else if (out?.contains("ERR:shutdown_failed") == true) {
+                toast(tr("TV chặn lệnh tắt nguồn qua ADB", "TV blocked shutdown via ADB"))
             }
         }
     }

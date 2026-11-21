@@ -1,5 +1,6 @@
 package vn.launcher.tv.ui.components
 
+import android.os.SystemClock
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -31,12 +32,15 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -44,6 +48,9 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
@@ -56,6 +63,61 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import vn.launcher.tv.model.LauncherTheme
 import vn.launcher.tv.ui.theme.LauncherColors
+
+fun Modifier.tvDialogClickable(
+    interactionSource: MutableInteractionSource,
+    onFocusStateChanged: (Boolean) -> Unit = {},
+    onClick: () -> Unit
+): Modifier = composed {
+    val currentOnClick by rememberUpdatedState(onClick)
+    val currentOnFocusChanged by rememberUpdatedState(onFocusStateChanged)
+    var pressedKeyCode by remember { mutableStateOf<Int?>(null) }
+    var lastClickUptimeMs by remember { mutableLongStateOf(0L) }
+
+    fun triggerClickOnce() {
+        if (TvInputGuard.isInLongPressCooldown()) return
+        val now = SystemClock.uptimeMillis()
+        if (now - lastClickUptimeMs < 320L) return
+        lastClickUptimeMs = now
+        currentOnClick()
+    }
+
+    this
+        .onFocusChanged { state ->
+            if (!state.isFocused) {
+                pressedKeyCode = null
+            }
+            currentOnFocusChanged(state.isFocused)
+        }
+        .onPreviewKeyEvent { ev ->
+            val code = ev.nativeKeyEvent.keyCode
+            if (!TvInputGuard.isConfirmKeyCode(code)) {
+                return@onPreviewKeyEvent false
+            }
+            when (ev.type) {
+                KeyEventType.KeyDown -> {
+                    if (ev.nativeKeyEvent.repeatCount == 0 && !TvInputGuard.isInLongPressCooldown()) {
+                        pressedKeyCode = code
+                    }
+                    true
+                }
+                KeyEventType.KeyUp -> {
+                    val wasPressedHere = pressedKeyCode == code
+                    pressedKeyCode = null
+                    if (wasPressedHere) {
+                        triggerClickOnce()
+                    }
+                    true
+                }
+                else -> false
+            }
+        }
+        .clickable(
+            interactionSource = interactionSource,
+            indication = null,
+            onClick = { triggerClickOnce() }
+        )
+}
 
 @Composable
 fun MacWindowDialog(
@@ -199,8 +261,11 @@ fun MacRow(
                 color = if (focused) Color.White else Color(0x22FFFFFF),
                 shape = shape
             )
-            .onFocusChanged { focused = it.isFocused }
-            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
+            .tvDialogClickable(
+                interactionSource = interactionSource,
+                onFocusStateChanged = { focused = it },
+                onClick = onClick
+            )
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -285,8 +350,11 @@ fun MacToggleRow(
                 color = if (focused) Color.White else Color(0x22FFFFFF),
                 shape = shape
             )
-            .onFocusChanged { focused = it.isFocused }
-            .clickable(interactionSource = interactionSource, indication = null, onClick = onToggle)
+            .tvDialogClickable(
+                interactionSource = interactionSource,
+                onFocusStateChanged = { focused = it },
+                onClick = onToggle
+            )
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -358,8 +426,11 @@ fun MacActionButton(
                 color = if (focused) Color.White else Color.Transparent,
                 shape = shape
             )
-            .onFocusChanged { focused = it.isFocused }
-            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
+            .tvDialogClickable(
+                interactionSource = interactionSource,
+                onFocusStateChanged = { focused = it },
+                onClick = onClick
+            )
             .padding(horizontal = 18.dp, vertical = 9.dp),
         contentAlignment = Alignment.Center
     ) {
