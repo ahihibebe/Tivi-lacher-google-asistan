@@ -1675,7 +1675,7 @@ private fun AiAnswerBoardDialog(
                 MacActionButton(
                     text = if (en) "Retry" else "Thử lại",
                     color = Color(0x5534C759),
-                    onClick = { vm.askGoogleAi(dialog.query) }
+                    onClick = { vm.askGoogleAi(dialog.query, forceRefresh = true) }
                 )
             }
             MacActionButton(

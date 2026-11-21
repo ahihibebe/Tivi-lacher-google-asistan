@@ -50,9 +50,15 @@ private val warmUpScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 @Volatile
 private var currentAppCheckMode: AppCheckMode = AppCheckMode.UNCONFIGURED
 
+@Volatile
+private var lastReadyAtMs: Long = 0L
+
+private const val READY_CACHE_TTL_MS = 15 * 60 * 1000L
+
 fun currentAppCheckMode(): AppCheckMode = currentAppCheckMode
 
 fun configureAppCheck(context: Context, intent: Intent?) {
+    lastReadyAtMs = 0L
     try {
         if (FirebaseApp.getApps(context).isEmpty()) {
             val initialized = FirebaseApp.initializeApp(context)
@@ -125,14 +131,16 @@ fun configureAppCheck(context: Context, intent: Intent?) {
 }
 
 /**
- * Non-blocking warm-up so reCAPTCHA / Debug token attestation initializes in the
- * background when the launcher starts instead of blocking the user's first AI query.
+ * Non-blocking warm-up so reCAPTCHA / Debug token attestation and the Gemini
+ * client initialize in the background when the launcher starts instead of
+ * adding cold-start latency to the user's first AI query.
  */
 fun prewarmAppCheck(context: Context) {
     val appCtx = context.applicationContext
     warmUpScope.launch {
+        GeminiAiService.warmup(appCtx)
         if (currentAppCheckMode == AppCheckMode.UNCONFIGURED) return@launch
-        awaitAppCheckReady(appCtx, timeoutMs = 15_000L)
+        awaitAppCheckReady(appCtx, timeoutMs = 12_000L)
     }
 }
 
@@ -171,7 +179,7 @@ fun saveCustomDebugTokenAndReconfigure(context: Context, rawToken: String?) {
 
 suspend fun awaitAppCheckReady(
     context: Context,
-    timeoutMs: Long = 15_000L
+    timeoutMs: Long = 8_000L
 ): AppCheckCheckResult = withContext(Dispatchers.IO) {
     if (FirebaseApp.getApps(context).isEmpty()) {
         return@withContext AppCheckCheckResult.Failed("FirebaseApp is not initialized.")
@@ -179,20 +187,27 @@ suspend fun awaitAppCheckReady(
     if (currentAppCheckMode == AppCheckMode.UNCONFIGURED) {
         return@withContext AppCheckCheckResult.Failed("App Check provider is unconfigured.")
     }
+    val now = System.currentTimeMillis()
+    if (lastReadyAtMs > 0L && now - lastReadyAtMs < READY_CACHE_TTL_MS) {
+        return@withContext AppCheckCheckResult.Ready
+    }
     val res = withTimeoutOrNull(timeoutMs) {
         suspendCancellableCoroutine<AppCheckCheckResult> { cont ->
             try {
                 FirebaseAppCheck.getInstance()
                     .getAppCheckToken(false)
                     .addOnSuccessListener {
+                        lastReadyAtMs = System.currentTimeMillis()
                         if (cont.isActive) cont.resume(AppCheckCheckResult.Ready)
                     }
                     .addOnFailureListener { err ->
+                        lastReadyAtMs = 0L
                         if (cont.isActive) {
                             cont.resume(AppCheckCheckResult.Failed(err.localizedMessage ?: err.message))
                         }
                     }
             } catch (e: Exception) {
+                lastReadyAtMs = 0L
                 if (cont.isActive) {
                     cont.resume(AppCheckCheckResult.Failed(e.localizedMessage ?: e.message))
                 }
@@ -203,6 +218,7 @@ suspend fun awaitAppCheckReady(
 }
 
 suspend fun diagnoseAppCheckTokenError(context: Context): String? {
+    lastReadyAtMs = 0L
     return when (val r = awaitAppCheckReady(context, timeoutMs = 8_000L)) {
         AppCheckCheckResult.Ready -> null
         AppCheckCheckResult.TimedOut -> "App Check token request timed out."

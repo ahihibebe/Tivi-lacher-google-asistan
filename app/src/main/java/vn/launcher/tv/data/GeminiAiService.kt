@@ -19,36 +19,60 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import java.util.Collections
 
 /**
- * Calls Google Gemini via Firebase AI Logic with streaming, low-latency thinking level,
- * fast App Check verification, and automatic fallback from gemini-3.8-flash to
- * gemini-3.5-flash-lite if the primary model stalls before first token.
+ * Low-latency Google Gemini client via Firebase AI Logic:
+ * - Uses gemini-3.5-flash-lite (ThinkingLevel.MINIMAL) as primary for sub-second TTFT on TV,
+ *   with automatic fallback to gemini-3.8-flash (ThinkingLevel.LOW) on transient stalls.
+ * - Pre-warms model initialization, caches recent answers briefly, compiles regexes once,
+ *   and throttles partial UI updates so low-power TV CPUs stay responsive.
  */
 object GeminiAiService {
 
     private const val TAG = "GeminiAiService"
-    private const val PRIMARY_MODEL = "gemini-3.8-flash"
-    private const val LITE_MODEL = "gemini-3.5-flash-lite"
+    private const val FAST_MODEL = "gemini-3.5-flash-lite"
+    private const val STANDARD_MODEL = "gemini-3.8-flash"
+
+    private const val CACHE_TTL_MS = 15 * 60 * 1000L
+    private const val MAX_CACHE_SIZE = 24
 
     private const val VI_SYSTEM_PROMPT =
-        "Bạn là trợ lý Google AI thông minh trên Android TV (VietLauncher). " +
-            "Hãy trả lời chính xác, dễ hiểu, súc tích bằng tiếng Việt (hoặc tiếng Anh nếu người dùng hỏi bằng tiếng Anh), " +
-            "trình bày văn bản thuần gọn đẹp để hiển thị trên màn hình TV và đọc thành tiếng tự nhiên " +
-            "(khoảng 3–6 câu ngắn hoặc gạch đầu dòng đơn giản bằng dấu '-'). Không dùng ký hiệu markdown ** hay ###."
+        "Bạn là trợ lý Google AI siêu nhanh trên Android TV. " +
+            "Trả lời thẳng vào trọng tâm, chính xác, tự nhiên để đọc thành tiếng trong 2–4 câu ngắn " +
+            "(khoảng 40–90 từ, không rào đón). Văn bản thuần, không dùng ** hay ###."
 
     private const val EN_SYSTEM_PROMPT =
-        "You are a helpful Google AI smart voice assistant on an Android TV launcher (VietLauncher). " +
-            "Give clear, accurate, concise answers in plain text suitable for a TV screen and voice readback " +
-            "(about 3-6 short sentences or brief bullet points using '-'). Avoid markdown headers or asterisks."
+        "You are a fast Google AI voice assistant on Android TV. " +
+            "Answer directly, accurately, and concisely in 2-4 short spoken-friendly sentences " +
+            "(~40-90 words, no filler). Plain text only without markdown asterisks or headers."
+
+    private val REGEX_CODE_FENCE = Regex("```[a-zA-Z]*\\n?")
+    private val REGEX_BOLD = Regex("\\*\\*(.*?)\\*\\*")
+    private val REGEX_UNDERLINE = Regex("__(.*?)__")
+    private val REGEX_HEADING = Regex("(?m)^#{1,6}\\s+")
+    private val REGEX_BULLET = Regex("(?m)^\\*\\s+")
+    private val REGEX_MULTI_NL = Regex("\\n{3,}")
+    private val REGEX_SPEECH_BULLET = Regex("(?m)^[-•]\\s+")
+    private val REGEX_MULTI_WS = Regex("\\s+")
 
     private class FirstTokenTimeoutException : CancellationException("First token timed out")
+
+    private data class CachedAnswer(val response: AiResponse, val timestampMs: Long)
+
+    private val cache: MutableMap<String, CachedAnswer> = Collections.synchronizedMap(
+        object : LinkedHashMap<String, CachedAnswer>(MAX_CACHE_SIZE, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CachedAnswer>?): Boolean {
+                return size > MAX_CACHE_SIZE
+            }
+        }
+    )
 
     private fun buildModel(modelName: String, isEnglish: Boolean, thinking: ThinkingLevel): GenerativeModel {
         return Firebase.ai.generativeModel(
             modelName = modelName,
             generationConfig = generationConfig {
-                maxOutputTokens = 700
+                maxOutputTokens = 320
                 thinkingConfig = thinkingConfig {
                     thinkingLevel = thinking
                 }
@@ -59,10 +83,10 @@ object GeminiAiService {
         )
     }
 
-    private val viPrimaryModel by lazy { buildModel(PRIMARY_MODEL, isEnglish = false, ThinkingLevel.LOW) }
-    private val enPrimaryModel by lazy { buildModel(PRIMARY_MODEL, isEnglish = true, ThinkingLevel.LOW) }
-    private val viLiteModel by lazy { buildModel(LITE_MODEL, isEnglish = false, ThinkingLevel.MINIMAL) }
-    private val enLiteModel by lazy { buildModel(LITE_MODEL, isEnglish = true, ThinkingLevel.MINIMAL) }
+    private val viFastModel by lazy { buildModel(FAST_MODEL, isEnglish = false, ThinkingLevel.MINIMAL) }
+    private val enFastModel by lazy { buildModel(FAST_MODEL, isEnglish = true, ThinkingLevel.MINIMAL) }
+    private val viStandardModel by lazy { buildModel(STANDARD_MODEL, isEnglish = false, ThinkingLevel.LOW) }
+    private val enStandardModel by lazy { buildModel(STANDARD_MODEL, isEnglish = true, ThinkingLevel.LOW) }
 
     data class AiResponse(
         val answerText: String = "",
@@ -71,10 +95,21 @@ object GeminiAiService {
         val isAppCheckError: Boolean = false
     )
 
+    /** Pre-instantiates the default model on IO thread after configureAppCheck(). */
+    fun warmup(context: Context) {
+        try {
+            if (FirebaseApp.getApps(context).isNotEmpty()) {
+                viFastModel
+            }
+        } catch (_: Throwable) {
+        }
+    }
+
     suspend fun askStreaming(
         context: Context,
         query: String,
         isEnglish: Boolean,
+        forceRefresh: Boolean = false,
         onStatus: (String) -> Unit = {},
         onPartialText: (String) -> Unit
     ): AiResponse = withContext(Dispatchers.IO) {
@@ -83,6 +118,16 @@ object GeminiAiService {
             return@withContext AiResponse(
                 errorMessage = if (isEnglish) "Empty question." else "Câu hỏi trống."
             )
+        }
+
+        val cacheKey = "${if (isEnglish) "en" else "vi"}|${cleanQuery.lowercase()}"
+        if (!forceRefresh) {
+            cache[cacheKey]?.let { entry ->
+                if (System.currentTimeMillis() - entry.timestampMs < CACHE_TTL_MS) {
+                    onPartialText(entry.response.answerText)
+                    return@withContext entry.response
+                }
+            }
         }
 
         try {
@@ -96,10 +141,9 @@ object GeminiAiService {
                 )
             }
 
-            // Phase 1: Bounded App Check verification so a stalled reCAPTCHA on Android TV
-            // surfaces quickly instead of spinning silently for 60 seconds.
-            onStatus(if (isEnglish) "Verifying App Check…" else "Đang xác thực App Check…")
-            val appCheckTimeoutMs = if (currentAppCheckMode() == AppCheckMode.RECAPTCHA) 14_000L else 8_000L
+            // Phase 1: Bounded App Check check (0ms when recently pre-warmed; caps hung reCAPTCHA at 9s/6s)
+            val appCheckTimeoutMs = if (currentAppCheckMode() == AppCheckMode.RECAPTCHA) 9_000L else 6_000L
+            onStatus(if (isEnglish) "Verifying App Check…" else "Đang xác thực nhanh…")
             when (val appCheckResult = awaitAppCheckReady(context, timeoutMs = appCheckTimeoutMs)) {
                 AppCheckCheckResult.Ready -> Unit
                 AppCheckCheckResult.TimedOut -> {
@@ -120,67 +164,71 @@ object GeminiAiService {
                 }
             }
 
-            // Phase 2: Primary streaming call with ThinkingLevel.LOW and a 14s first-token watchdog
-            onStatus(if (isEnglish) "Asking Google AI…" else "Google AI đang tìm câu trả lời…")
-            val primaryModel = if (isEnglish) enPrimaryModel else viPrimaryModel
-            val primaryAccumulated = StringBuilder()
+            // Phase 2: Ultra-fast primary stream with gemini-3.5-flash-lite (ThinkingLevel.MINIMAL)
+            onStatus(if (isEnglish) "Asking Google AI…" else "Google AI đang trả lời…")
+            val fastModel = if (isEnglish) enFastModel else viFastModel
+            val fastAccumulated = StringBuilder()
 
-            val primaryFailure: Exception? = try {
+            val fastFailure: Exception? = try {
                 streamWithFirstTokenTimeout(
-                    model = primaryModel,
+                    model = fastModel,
                     query = cleanQuery,
-                    firstTokenTimeoutMs = 14_000L,
-                    totalTimeoutMs = 35_000L,
-                    accumulated = primaryAccumulated,
+                    firstTokenTimeoutMs = 9_000L,
+                    totalTimeoutMs = 24_000L,
+                    accumulated = fastAccumulated,
                     onPartialText = onPartialText
                 )
                 null
             } catch (e: FirstTokenTimeoutException) {
-                Log.w(TAG, "$PRIMARY_MODEL produced no token within 14s; falling back to $LITE_MODEL.")
+                Log.w(TAG, "$FAST_MODEL produced no token within 9s; trying $STANDARD_MODEL.")
                 e
             } catch (e: TimeoutCancellationException) {
-                Log.w(TAG, "$PRIMARY_MODEL timed out; checking partial or falling back.")
-                if (primaryAccumulated.isNotBlank()) null else e
+                Log.w(TAG, "$FAST_MODEL timed out; checking partial or falling back.")
+                if (fastAccumulated.isNotBlank()) null else e
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.w(TAG, "$PRIMARY_MODEL failed: ${e.message}", e)
+                Log.w(TAG, "$FAST_MODEL failed: ${e.message}", e)
                 if (isAppCheckExceptionMessage(e.localizedMessage)) throw e
-                if (primaryAccumulated.isNotBlank()) null else e
+                if (fastAccumulated.isNotBlank()) null else e
             }
 
-            if (primaryFailure == null && primaryAccumulated.isNotBlank()) {
-                return@withContext finalizeSuccess(primaryAccumulated.toString(), isEnglish)
+            if (fastFailure == null && fastAccumulated.isNotBlank()) {
+                return@withContext finalizeSuccess(fastAccumulated.toString(), isEnglish).also { res ->
+                    if (res.errorMessage == null) cache[cacheKey] = CachedAnswer(res, System.currentTimeMillis())
+                }
             }
 
-            // Phase 3: Ultra-fast fallback with gemini-3.5-flash-lite (ThinkingLevel.MINIMAL)
+            // Phase 3: Fallback to gemini-3.8-flash (ThinkingLevel.LOW)
             onStatus(
-                if (isEnglish) "Slow response, trying faster Flash-Lite…"
-                else "Phản hồi chậm, đang chuyển sang Flash-Lite nhanh hơn…"
+                if (isEnglish) "Switching AI route…"
+                else "Đang thử tuyến AI dự phòng…"
             )
-            val liteModel = if (isEnglish) enLiteModel else viLiteModel
-            val liteAccumulated = StringBuilder()
+            val fallbackModel = if (isEnglish) enStandardModel else viStandardModel
+            val fallbackAccumulated = StringBuilder()
             try {
                 streamWithFirstTokenTimeout(
-                    model = liteModel,
+                    model = fallbackModel,
                     query = cleanQuery,
-                    firstTokenTimeoutMs = 18_000L,
-                    totalTimeoutMs = 25_000L,
-                    accumulated = liteAccumulated,
+                    firstTokenTimeoutMs = 14_000L,
+                    totalTimeoutMs = 24_000L,
+                    accumulated = fallbackAccumulated,
                     onPartialText = onPartialText
                 )
             } catch (_: FirstTokenTimeoutException) {
                 return@withContext timeoutErrorResponse(isEnglish)
             } catch (e: TimeoutCancellationException) {
-                if (liteAccumulated.isBlank()) return@withContext timeoutErrorResponse(isEnglish)
+                if (fallbackAccumulated.isBlank()) return@withContext timeoutErrorResponse(isEnglish)
             }
 
-            if (liteAccumulated.isNotBlank()) {
-                return@withContext finalizeSuccess(liteAccumulated.toString(), isEnglish)
+            if (fallbackAccumulated.isNotBlank()) {
+                return@withContext finalizeSuccess(fallbackAccumulated.toString(), isEnglish).also { res ->
+                    if (res.errorMessage == null) cache[cacheKey] = CachedAnswer(res, System.currentTimeMillis())
+                }
             }
 
-            if (primaryFailure != null && primaryFailure !is FirstTokenTimeoutException && primaryFailure !is TimeoutCancellationException) {
-                throw primaryFailure
+            if (fastFailure != null && fastFailure !is FirstTokenTimeoutException && fastFailure !is TimeoutCancellationException) {
+                throw fastFailure
             }
 
             AiResponse(
@@ -237,6 +285,7 @@ object GeminiAiService {
         withTimeout(totalTimeoutMs) {
             coroutineScope {
                 var gotFirstText = false
+                var lastEmitMs = 0L
                 val watchdog = launch {
                     delay(firstTokenTimeoutMs)
                     if (!gotFirstText) {
@@ -247,12 +296,17 @@ object GeminiAiService {
                     model.generateContentStream(query).collect { chunk ->
                         val piece = chunk.text.orEmpty()
                         if (piece.isNotEmpty()) {
-                            if (!gotFirstText) {
+                            val first = !gotFirstText
+                            if (first) {
                                 gotFirstText = true
                                 watchdog.cancel()
                             }
                             accumulated.append(piece)
-                            onPartialText(cleanForTvDisplay(accumulated.toString()))
+                            val now = System.currentTimeMillis()
+                            if (first || now - lastEmitMs >= 45L) {
+                                lastEmitMs = now
+                                onPartialText(cleanForTvDisplay(accumulated.toString()))
+                            }
                         }
                     }
                 } finally {
@@ -347,23 +401,23 @@ object GeminiAiService {
 
     private fun cleanForTvDisplay(text: String): String {
         return text
-            .replace(Regex("```[a-zA-Z]*\\n?"), "")
+            .replace(REGEX_CODE_FENCE, "")
             .replace("```", "")
-            .replace(Regex("\\*\\*(.*?)\\*\\*"), "$1")
-            .replace(Regex("__(.*?)__"), "$1")
-            .replace(Regex("(?m)^#{1,6}\\s+"), "")
-            .replace(Regex("(?m)^\\*\\s+"), "- ")
-            .replace(Regex("\\n{3,}"), "\n\n")
+            .replace(REGEX_BOLD, "$1")
+            .replace(REGEX_UNDERLINE, "$1")
+            .replace(REGEX_HEADING, "")
+            .replace(REGEX_BULLET, "- ")
+            .replace(REGEX_MULTI_NL, "\n\n")
             .trim()
     }
 
     private fun cleanForSpeech(text: String): String {
         val compact = text
-            .replace(Regex("(?m)^[-•]\\s+"), "")
-            .replace(Regex("\\s+"), " ")
+            .replace(REGEX_SPEECH_BULLET, "")
+            .replace(REGEX_MULTI_WS, " ")
             .trim()
-        return if (compact.length > 520) {
-            val cut = compact.lastIndexOf('.', 520).takeIf { it > 200 } ?: 520
+        return if (compact.length > 420) {
+            val cut = compact.lastIndexOf('.', 420).takeIf { it > 160 } ?: 420
             compact.substring(0, cut).trim() + "."
         } else {
             compact

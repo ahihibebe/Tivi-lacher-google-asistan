@@ -2073,11 +2073,12 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun askGoogleAi(query: String) {
+    fun askGoogleAi(query: String, forceRefresh: Boolean = false) {
         val q = query.trim()
         if (q.isEmpty()) return
         val en = _uiState.value.isEnglish
         aiFetchJob?.cancel()
+        warmUpTts()
         _uiState.update {
             it.copy(
                 activeDialog = ActiveDialog.AiAnswerBoard(
@@ -2092,6 +2093,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                 context = app,
                 query = q,
                 isEnglish = en,
+                forceRefresh = forceRefresh,
                 onStatus = { status ->
                     _uiState.update { st ->
                         val cur = st.activeDialog
@@ -2151,7 +2153,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
             else tr("Đã lưu App Check Debug Token", "Saved App Check Debug Token")
         )
         if (!returnQuery.isNullOrBlank()) {
-            askGoogleAi(returnQuery)
+            askGoogleAi(returnQuery, forceRefresh = true)
         } else {
             closeDialog()
         }
@@ -2346,6 +2348,33 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         true
     } catch (_: Exception) {
         false
+    }
+
+    private fun warmUpTts() {
+        if (tts != null) return
+        val googlePkg = "com.google.android.tts"
+        val useGoogle = isPackageInstalled(googlePkg)
+        val initListener = TextToSpeech.OnInitListener { status ->
+            if (status != TextToSpeech.SUCCESS || tts == null) {
+                if (useGoogle) {
+                    try {
+                        tts?.shutdown()
+                    } catch (_: Exception) {
+                    }
+                    tts = TextToSpeech(app) { st2 ->
+                        onTtsReady(st2)
+                    }
+                }
+                return@OnInitListener
+            }
+            onTtsReady(status)
+        }
+        ttsReady = false
+        tts = if (useGoogle) {
+            TextToSpeech(app, initListener, googlePkg)
+        } else {
+            TextToSpeech(app, initListener)
+        }
     }
 
     fun speak(text: String) {
