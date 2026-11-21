@@ -9,6 +9,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -31,6 +32,7 @@ import androidx.compose.material.icons.automirrored.filled.Input
 import androidx.compose.material.icons.automirrored.filled.VolumeDown
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bluetooth
@@ -56,19 +58,20 @@ import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -80,7 +83,9 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -91,6 +96,7 @@ import androidx.compose.ui.unit.sp
 import vn.launcher.tv.R
 import vn.launcher.tv.data.AdminData
 import vn.launcher.tv.model.ActiveDialog
+import vn.launcher.tv.model.ClockFontStyle
 import vn.launcher.tv.model.LauncherTheme
 import vn.launcher.tv.model.LauncherUiState
 import vn.launcher.tv.ui.components.MacActionButton
@@ -140,6 +146,7 @@ fun ActiveDialogHost(
         )
         ActiveDialog.AboutInfo -> AboutInfoDialog(state, vm)
         ActiveDialog.DisplayMenu -> DisplayMenuDialog(state, vm)
+        ActiveDialog.ClockStyleMenu -> ClockStyleMenuDialog(state, vm)
         ActiveDialog.ChooseProvince -> ChooseProvinceDialog(state, vm)
         is ActiveDialog.ChooseWard -> ChooseWardDialog(dialog, state.theme, en, vm)
         is ActiveDialog.ManualWardInput -> MacEditDialog(
@@ -263,6 +270,17 @@ private fun SettingsMainDialog(state: LauncherUiState, vm: LauncherViewModel) {
             showChevron = true,
             onFocused = vm::playMove,
             onClick = { vm.openDialog(ActiveDialog.WallpaperMenu) }
+        )
+        MacRow(
+            title = if (en) "Clock widget style" else "Kiểu chữ widget giờ",
+            theme = state.theme,
+            icon = Icons.Filled.AccessTime,
+            iconTintBg = palette[5],
+            trailing = clockFontShortLabel(state.display.clockFont, en),
+            showChevron = true,
+            testTag = "settings_clock_style_row",
+            onFocused = vm::playMove,
+            onClick = { vm.openDialog(ActiveDialog.ClockStyleMenu) }
         )
         MacRow(
             title = if (en) "Language" else "Ngôn ngữ",
@@ -822,39 +840,166 @@ private fun WallpaperMenuDialog(
 @Composable
 private fun WallpaperOpacityDialog(state: LauncherUiState, vm: LauncherViewModel) {
     val en = state.isEnglish
-    var valPct by remember(state.bgAlphaPercent) { mutableFloatStateOf(state.bgAlphaPercent.toFloat()) }
+    var pct by remember(state.bgAlphaPercent) { mutableIntStateOf(state.bgAlphaPercent.coerceIn(0, 100)) }
+    val barFocus = remember { FocusRequester() }
+    var barFocused by remember { mutableStateOf(false) }
+    var okPressedHere by remember { mutableStateOf(false) }
+    var trackWidthPx by remember { mutableIntStateOf(1) }
+    val accent = LauncherColors.accent(state.theme)
+
+    fun applyPct(next: Int) {
+        val clamped = next.coerceIn(0, 100)
+        if (clamped != pct) {
+            pct = clamped
+            vm.setWallpaperOpacity(clamped)
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        barFocus.requestFocus()
+    }
 
     MacWindowDialog(
         title = if (en) "Wallpaper opacity" else "Độ trong suốt hình nền",
         theme = state.theme,
         maxWidth = 500.dp,
+        scrollable = false,
         onDismiss = vm::closeDialog
     ) {
         Text(
-            text = "${if (en) "Opacity" else "Độ rõ"}: ${valPct.roundToInt()}%",
+            text = "${if (en) "Opacity" else "Độ rõ"}: $pct%",
             color = Color.White,
-            fontSize = 15.sp,
-            modifier = Modifier.padding(8.dp)
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
         )
-        Slider(
-            value = valPct,
-            onValueChange = {
-                valPct = it
-                vm.setWallpaperOpacity(it.roundToInt())
-            },
-            valueRange = 0f..100f,
-            colors = SliderDefaults.colors(
-                thumbColor = Color.White,
-                activeTrackColor = LauncherColors.accent(state.theme),
-                inactiveTrackColor = Color(0x44FFFFFF)
-            ),
-            modifier = Modifier.padding(horizontal = 8.dp)
+        Text(
+            text = if (en) "Press Left / Right to adjust, OK to close"
+            else "Bấm Trái / Phải để chỉnh, bấm OK để xong",
+            color = Color(0xB3FFFFFF),
+            fontSize = 12.sp,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
         )
         Spacer(Modifier.height(10.dp))
+
+        val barShape = RoundedCornerShape(14.dp)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(54.dp)
+                .testTag("wallpaper_opacity_slider")
+                .clip(barShape)
+                .background(if (barFocused) accent.copy(alpha = 0.28f) else Color(0x1EFFFFFF), barShape)
+                .border(if (barFocused) 2.dp else 1.dp, if (barFocused) Color.White else Color(0x33FFFFFF), barShape)
+                .focusRequester(barFocus)
+                .onFocusChanged {
+                    barFocused = it.isFocused
+                    if (!it.isFocused) okPressedHere = false
+                }
+                .onPreviewKeyEvent { ev ->
+                    when {
+                        ev.type == KeyEventType.KeyDown && ev.key == Key.DirectionLeft -> {
+                            vm.playMove()
+                            applyPct(pct - 5)
+                            true
+                        }
+                        ev.type == KeyEventType.KeyDown && ev.key == Key.DirectionRight -> {
+                            vm.playMove()
+                            applyPct(pct + 5)
+                            true
+                        }
+                        ev.type == KeyEventType.KeyDown && (ev.key == Key.DirectionUp || ev.key == Key.DirectionDown) -> {
+                            true
+                        }
+                        ev.type == KeyEventType.KeyDown &&
+                            (ev.key == Key.DirectionCenter || ev.key == Key.Enter || ev.key == Key.NumPadEnter) -> {
+                            if (ev.nativeKeyEvent.repeatCount == 0) {
+                                okPressedHere = true
+                            }
+                            true
+                        }
+                        ev.type == KeyEventType.KeyUp &&
+                            (ev.key == Key.DirectionCenter || ev.key == Key.Enter || ev.key == Key.NumPadEnter) -> {
+                            val wasPressed = okPressedHere
+                            okPressedHere = false
+                            if (wasPressed) {
+                                vm.playSelect()
+                                vm.closeDialog()
+                            }
+                            true
+                        }
+                        else -> false
+                    }
+                }
+                .focusable()
+                .padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "◀",
+                color = if (pct > 0) Color.White else Color(0x55FFFFFF),
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .padding(horizontal = 12.dp)
+                    .onSizeChanged { trackWidthPx = it.width.coerceAtLeast(1) }
+                    .pointerInput(Unit) {
+                        detectTapGestures { offset ->
+                            val ratio = (offset.x / trackWidthPx.toFloat()).coerceIn(0f, 1f)
+                            applyPct((ratio * 100f).roundToInt())
+                        }
+                    }
+                    .pointerInput(Unit) {
+                        detectHorizontalDragGestures { change, _ ->
+                            change.consume()
+                            val ratio = (change.position.x / trackWidthPx.toFloat()).coerceIn(0f, 1f)
+                            applyPct((ratio * 100f).roundToInt())
+                        }
+                    },
+                contentAlignment = Alignment.CenterStart
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(10.dp)
+                        .clip(CircleShape)
+                        .background(Color(0x44FFFFFF))
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth((pct / 100f).coerceIn(0f, 1f))
+                            .fillMaxHeight()
+                            .clip(CircleShape)
+                            .background(if (barFocused) Color.White else accent)
+                    )
+                }
+            }
+            Text(
+                text = "▶",
+                color = if (pct < 100) Color.White else Color(0x55FFFFFF),
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = "$pct%",
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.width(44.dp),
+                textAlign = TextAlign.End
+            )
+        }
+
+        Spacer(Modifier.height(14.dp))
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             MacActionButton(
                 text = if (en) "Done" else "Xong",
-                color = LauncherColors.accent(state.theme),
+                color = accent,
                 onClick = vm::closeDialog
             )
         }
@@ -1158,6 +1303,16 @@ private fun DisplayMenuDialog(state: LauncherUiState, vm: LauncherViewModel) {
         MacToggleRow(if (en) "Weather" else "Thời tiết", d.weatherOn, state.theme, en, onFocused = vm::playMove) {
             vm.toggleDisplayPref("weatherOn")
         }
+        MacToggleRow(
+            title = if (en) "Temperature & Humidity" else "Nhiệt độ & Độ ẩm",
+            checked = d.humidityOn,
+            theme = state.theme,
+            isEnglish = en,
+            testTag = "toggle_humidity_widget",
+            onFocused = vm::playMove
+        ) {
+            vm.toggleDisplayPref("humidityOn")
+        }
         MacRow(
             title = if (en) "Province / City" else "Tỉnh / Thành phố",
             theme = state.theme,
@@ -1214,7 +1369,18 @@ private fun DisplayMenuDialog(state: LauncherUiState, vm: LauncherViewModel) {
             vm.toggleDisplayPref("nameOn")
         }
 
-        MacSectionHeader(if (en) "Wallpaper" else "Hình nền")
+        MacSectionHeader(if (en) "Clock widget & Wallpaper" else "Widget giờ & Hình nền")
+        MacRow(
+            title = if (en) "Clock widget style (font, bold, dashed)" else "Kiểu chữ widget giờ (font, đậm, nét đứt)",
+            theme = state.theme,
+            icon = Icons.Filled.AccessTime,
+            iconTintBg = palette[5],
+            trailing = clockFontShortLabel(d.clockFont, en),
+            showChevron = true,
+            testTag = "display_clock_style_row",
+            onFocused = vm::playMove,
+            onClick = { vm.openDialog(ActiveDialog.ClockStyleMenu) }
+        )
         MacRow(
             title = if (en) "Wallpaper opacity…" else "Độ trong suốt hình nền…",
             theme = state.theme,
@@ -1225,6 +1391,104 @@ private fun DisplayMenuDialog(state: LauncherUiState, vm: LauncherViewModel) {
             onFocused = vm::playMove,
             onClick = { vm.openDialog(ActiveDialog.WallpaperOpacity) }
         )
+    }
+}
+
+private fun clockFontShortLabel(style: ClockFontStyle, en: Boolean): String = when (style) {
+    ClockFontStyle.DEFAULT -> if (en) "Default" else "Mặc định"
+    ClockFontStyle.OUTFIT -> "Outfit"
+    ClockFontStyle.ORBITRON -> "Orbitron"
+    ClockFontStyle.JETBRAINS_MONO -> "Mono"
+    ClockFontStyle.PLAYFAIR -> "Playfair"
+}
+
+@Composable
+private fun ClockStyleMenuDialog(state: LauncherUiState, vm: LauncherViewModel) {
+    val en = state.isEnglish
+    val d = state.display
+    val palette = LauncherColors.SettingsPalette
+
+    val fontOptions = listOf(
+        ClockFontStyle.DEFAULT to (if (en) "Default (System Sans)" else "Mặc định (Hệ thống)"),
+        ClockFontStyle.OUTFIT to (if (en) "Modern Rounded (Outfit)" else "Hiện đại (Outfit)"),
+        ClockFontStyle.ORBITRON to (if (en) "Digital LED (Orbitron)" else "Kỹ thuật số (Orbitron)"),
+        ClockFontStyle.JETBRAINS_MONO to (if (en) "Monospace (JetBrains Mono)" else "Đơn cách (JetBrains Mono)"),
+        ClockFontStyle.PLAYFAIR to (if (en) "Classic Serif (Playfair)" else "Cổ điển (Playfair)")
+    )
+
+    MacWindowDialog(
+        title = if (en) "Clock widget style" else "Kiểu chữ widget giờ",
+        theme = state.theme,
+        maxWidth = 540.dp,
+        onDismiss = vm::closeDialog
+    ) {
+        // Live preview card
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 10.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Color(0x22FFFFFF))
+                .border(1.dp, Color(0x40FFFFFF), RoundedCornerShape(16.dp))
+                .padding(vertical = 12.dp, horizontal = 16.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                ClockTimeText(
+                    timeText = state.header.timeText.ifEmpty { "19:33" },
+                    fontStyle = d.clockFont,
+                    bold = d.clockBold,
+                    dashed = d.clockDashed,
+                    fontSize = 48.sp
+                )
+                if (state.header.dateText.isNotEmpty()) {
+                    Text(
+                        text = state.header.dateText,
+                        color = Color(0xCCFFFFFF),
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+
+        MacSectionHeader(if (en) "Digit style" else "Kiểu nét chữ")
+        MacToggleRow(
+            title = if (en) "Bold digits" else "Chữ đậm",
+            checked = d.clockBold,
+            theme = state.theme,
+            isEnglish = en,
+            testTag = "clock_bold_toggle",
+            onFocused = vm::playMove,
+            onToggle = { vm.toggleClockBold() }
+        )
+        MacToggleRow(
+            title = if (en) "Dashed outline" else "Nét đứt",
+            checked = d.clockDashed,
+            theme = state.theme,
+            isEnglish = en,
+            testTag = "clock_dashed_toggle",
+            onFocused = vm::playMove,
+            onToggle = { vm.toggleClockDashed() }
+        )
+
+        MacSectionHeader(if (en) "Font family" else "Kiểu font")
+        fontOptions.forEachIndexed { idx, (style, label) ->
+            MacRow(
+                title = label,
+                theme = state.theme,
+                icon = Icons.Filled.AccessTime,
+                iconTintBg = palette[idx % palette.size],
+                trailing = if (d.clockFont == style) "✓" else null,
+                testTag = "clock_font_${style.id}",
+                onFocused = vm::playMove,
+                onClick = {
+                    vm.playSelect()
+                    vm.setClockFont(style)
+                }
+            )
+        }
     }
 }
 

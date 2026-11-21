@@ -153,11 +153,13 @@ class MainActivity : ComponentActivity() {
             }
 
             BackHandler(
-                enabled = scrollState.value > 40 &&
-                    state.activeDialog == null &&
-                    !state.slideshow.fullscreenOpen
+                enabled = state.activeDialog == null &&
+                    !state.slideshow.fullscreenOpen &&
+                    state.movingPkg == null
             ) {
-                scope.launch { scrollState.animateScrollTo(0) }
+                if (scrollState.value > 40) {
+                    scope.launch { scrollState.animateScrollTo(0) }
+                }
             }
 
             VietLauncherTheme(theme = state.theme) {

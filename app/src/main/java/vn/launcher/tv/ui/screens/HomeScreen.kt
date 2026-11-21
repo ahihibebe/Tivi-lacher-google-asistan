@@ -35,18 +35,18 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SettingsEthernet
-import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Icon
@@ -73,7 +73,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
@@ -81,12 +85,17 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
@@ -95,6 +104,7 @@ import kotlinx.coroutines.launch
 import vn.launcher.tv.R
 import vn.launcher.tv.data.WeatherService
 import vn.launcher.tv.model.AppItem
+import vn.launcher.tv.model.ClockFontStyle
 import vn.launcher.tv.model.DockTab
 import vn.launcher.tv.model.LauncherTheme
 import vn.launcher.tv.model.LauncherUiState
@@ -142,12 +152,14 @@ fun HomeScreen(
     var isAllAppsActive by remember { mutableStateOf(scrollState.value > 40) }
     var prevScrollValue by remember { mutableIntStateOf(scrollState.value) }
     var allAppsTopPx by remember { mutableIntStateOf(0) }
+    var focusedGridAppLabel by remember { mutableStateOf("") }
 
     LaunchedEffect(scrollState.value) {
         if (scrollState.value > 40) {
             isAllAppsActive = true
         } else if (prevScrollValue > 40 && scrollState.value <= 8 && isAllAppsActive) {
             isAllAppsActive = false
+            focusedGridAppLabel = ""
             try {
                 firstDockFocus.requestFocus()
             } catch (_: Exception) {
@@ -233,43 +245,119 @@ fun HomeScreen(
                         horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.Start),
                         verticalAlignment = Alignment.Top
                     ) {
-                        // Left: Clock / Date / System bars wrapped in macOS glass widget card
+                        // Left: Unified Clock / Date / Compact Weather, Temp-Humidity & System Mini-Cards
                         Column(modifier = Modifier.weight(1f)) {
+                            val showWeatherCard = state.weather.enabled
+                            val showHumidityCard = state.display.humidityOn
+                            val showSysCards = state.sysBars.enabled
+                            val miniCards = buildList {
+                                if (showWeatherCard) {
+                                    val w = state.weather
+                                    val desc = if (w.hasData) WeatherService.describe(w.code, en) else null
+                                    add(
+                                        MiniCardSpec(
+                                            dotColor = Color(0xFFFF9F0A),
+                                            label = if (en) "WEATHER" else "THỜI TIẾT",
+                                            badge = if (w.hasData) "${w.rain}%☂" else "",
+                                            mainValue = if (w.hasData) "${Math.round(w.temp)}°" else "…",
+                                            subValue = if (w.hasData) "${desc!!.first} ${Math.round(w.min)}/${Math.round(w.max)}°" else if (en) "Loading" else "Đang tải",
+                                            progress = if (w.hasData) ((w.temp.toFloat() / 42f).coerceIn(0.12f, 1f)) else 0.15f
+                                        )
+                                    )
+                                }
+                                if (showHumidityCard) {
+                                    val w = state.weather
+                                    val dc = state.deviceClimate
+                                    val exactTemp = dc.tempC
+                                    val exactHum = dc.humidity
+                                    val displayHum = exactHum ?: if (w.hasData) w.humidity else null
+                                    val displayTemp = exactTemp ?: if (w.hasData) w.temp else null
+                                    val hasSensor = dc.hasAnySensor
+                                    add(
+                                        MiniCardSpec(
+                                            dotColor = if (hasSensor) Color(0xFF30D158) else Color(0xFF38BDF8),
+                                            label = if (en) "TEMP · HUM" else "NHIỆT · ẨM",
+                                            badge = "",
+                                            mainValue = if (displayHum != null) "$displayHum%" else if (hasSensor) "—" else "…",
+                                            subValue = if (displayTemp != null) {
+                                                String.format(Locale.US, "%.1f°C", displayTemp)
+                                            } else if (hasSensor) {
+                                                if (en) "Sensor" else "Cảm biến"
+                                            } else if (en) {
+                                                "Loading"
+                                            } else {
+                                                "Đang tải"
+                                            },
+                                            progress = if (displayHum != null) (displayHum / 100f).coerceIn(0.08f, 1f) else 0.12f,
+                                            sensorContentDescription = if (hasSensor) {
+                                                if (en) "Device sensor" else "Cảm biến thiết bị"
+                                            } else {
+                                                null
+                                            }
+                                        )
+                                    )
+                                }
+                                if (showSysCards) {
+                                    val s = state.sysBars
+                                    add(
+                                        MiniCardSpec(
+                                            dotColor = Color(0xFF8B5CF6),
+                                            label = "RAM",
+                                            badge = "",
+                                            mainValue = "${s.ramPercent}%",
+                                            subValue = String.format(Locale.US, "%.1f/%.0fG", s.ramUsedGb, s.ramTotalGb),
+                                            progress = (s.ramPercent / 100f).coerceIn(0.06f, 1f)
+                                        )
+                                    )
+                                    add(
+                                        MiniCardSpec(
+                                            dotColor = Color(0xFF14B8A6),
+                                            label = if (en) "STORAGE" else "Ổ CỨNG",
+                                            badge = "",
+                                            mainValue = "${s.storagePercent}%",
+                                            subValue = String.format(Locale.US, "%.0f/%.0fG", s.storageUsedGb, s.storageTotalGb),
+                                            progress = (s.storagePercent / 100f).coerceIn(0.06f, 1f)
+                                        )
+                                    )
+                                }
+                            }
+                            val showMiniGrid = miniCards.isNotEmpty()
                             Column(
                                 modifier = Modifier
-                                    .widthIn(max = 390.dp)
-                                    .clip(RoundedCornerShape(22.dp))
-                                    .background(barSurfaceBrush(state.theme), RoundedCornerShape(22.dp))
-                                    .border(1.dp, Color(0x3DFFFFFF), RoundedCornerShape(22.dp))
-                                    .padding(horizontal = 18.dp, vertical = 14.dp)
+                                    .wrapContentWidth(Alignment.Start)
+                                    .widthIn(max = if (showMiniGrid && !isCompactWidth) 460.dp else 320.dp)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(barSurfaceBrush(state.theme), RoundedCornerShape(20.dp))
+                                    .border(1.dp, Color(0x3DFFFFFF), RoundedCornerShape(20.dp))
+                                    .padding(horizontal = 14.dp, vertical = 10.dp)
                             ) {
-                                Text(
-                                    text = state.header.greeting,
-                                    color = LauncherColors.TextSecondary,
-                                    fontSize = 12.sp,
-                                    letterSpacing = 1.2.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+                                @Composable
+                                fun ClockTextColumn(modifier: Modifier = Modifier) {
+                                    Column(modifier = modifier) {
+                                        Text(
+                                            text = state.header.greeting,
+                                            color = LauncherColors.TextSecondary,
+                                            fontSize = 11.5.sp,
+                                            letterSpacing = 0.8.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
 
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(top = 2.dp)
-                                ) {
-                                    Text(
-                                        text = state.header.timeText.ifEmpty { "00:00" },
-                                        color = Color.White,
-                                        fontSize = if (isCompactWidth) 36.sp else 46.sp,
-                                        fontWeight = FontWeight.Light,
-                                        letterSpacing = (-1).sp
-                                    )
-                                    Spacer(Modifier.width(16.dp))
-                                    Column {
+                                        Spacer(Modifier.height(1.dp))
+                                        ClockTimeText(
+                                            timeText = state.header.timeText.ifEmpty { "00:00" },
+                                            fontStyle = state.display.clockFont,
+                                            bold = state.display.clockBold,
+                                            dashed = state.display.clockDashed,
+                                            fontSize = if (isCompactWidth) 34.sp else 42.sp
+                                        )
+
+                                        Spacer(Modifier.height(1.dp))
                                         Text(
                                             text = state.header.dateText,
                                             color = LauncherColors.TextSecondary,
-                                            fontSize = 12.sp,
-                                            letterSpacing = 0.8.sp,
+                                            fontSize = 11.5.sp,
+                                            letterSpacing = 0.5.sp,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
@@ -277,69 +365,98 @@ fun HomeScreen(
                                             Text(
                                                 text = state.header.lunarText,
                                                 color = LauncherColors.TextMuted,
-                                                fontSize = 11.sp,
-                                                letterSpacing = 0.4.sp,
+                                                fontSize = 10.5.sp,
+                                                letterSpacing = 0.2.sp,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis,
-                                                modifier = Modifier.padding(top = 2.dp)
+                                                modifier = Modifier.padding(top = 1.dp)
+                                            )
+                                        }
+
+                                        if (!state.header.holidayText.isNullOrEmpty()) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier.padding(top = 4.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.Favorite,
+                                                    contentDescription = null,
+                                                    tint = LauncherColors.HeartRed,
+                                                    modifier = Modifier.size(11.dp)
+                                                )
+                                                Spacer(Modifier.width(4.dp))
+                                                Text(
+                                                    text = state.header.holidayText,
+                                                    color = LauncherColors.TextSecondary,
+                                                    fontSize = 10.5.sp,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+
+                                        if (!state.header.lunarAlertText.isNullOrEmpty()) {
+                                            Text(
+                                                text = state.header.lunarAlertText,
+                                                color = LauncherColors.AlertRed,
+                                                fontSize = 10.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.padding(top = 3.dp)
                                             )
                                         }
                                     }
                                 }
 
-                                if (state.sysBars.enabled) {
-                                    Spacer(Modifier.height(8.dp))
-                                    SystemBarItem(
-                                        icon = Icons.Filled.Storage,
-                                        percent = state.sysBars.storagePercent,
-                                        label = String.format(
-                                            Locale.US,
-                                            "%.1f/%.1f GB",
-                                            state.sysBars.storageUsedGb,
-                                            state.sysBars.storageTotalGb
-                                        )
-                                    )
-                                    Spacer(Modifier.height(4.dp))
-                                    SystemBarItem(
-                                        icon = Icons.Filled.Memory,
-                                        percent = state.sysBars.ramPercent,
-                                        label = String.format(
-                                            Locale.US,
-                                            "%.1f/%.1f GB",
-                                            state.sysBars.ramUsedGb,
-                                            state.sysBars.ramTotalGb
-                                        )
-                                    )
-                                }
-
-                                if (!state.header.holidayText.isNullOrEmpty()) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.padding(top = 8.dp)
+                                @Composable
+                                fun MiniCardsGrid(modifier: Modifier = Modifier) {
+                                    Column(
+                                        modifier = modifier,
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
-                                        Icon(
-                                            imageVector = Icons.Filled.Favorite,
-                                            contentDescription = null,
-                                            tint = LauncherColors.HeartRed,
-                                            modifier = Modifier.size(13.dp)
-                                        )
-                                        Spacer(Modifier.width(6.dp))
-                                        Text(
-                                            text = state.header.holidayText,
-                                            color = LauncherColors.TextSecondary,
-                                            fontSize = 11.sp
-                                        )
+                                        if (miniCards.size == 3) {
+                                            MiniStatCard(
+                                                spec = miniCards[0],
+                                                modifier = Modifier.fillMaxWidth()
+                                            )
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                MiniStatCard(spec = miniCards[1], modifier = Modifier.weight(1f))
+                                                MiniStatCard(spec = miniCards[2], modifier = Modifier.weight(1f))
+                                            }
+                                        } else {
+                                            miniCards.chunked(2).forEach { pair ->
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                ) {
+                                                    pair.forEach { card ->
+                                                        MiniStatCard(spec = card, modifier = Modifier.weight(1f))
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
 
-                                if (!state.header.lunarAlertText.isNullOrEmpty()) {
-                                    Text(
-                                        text = state.header.lunarAlertText,
-                                        color = LauncherColors.AlertRed,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(top = 5.dp)
-                                    )
+                                if (showMiniGrid && !isCompactWidth) {
+                                    val gridWidth = if (miniCards.size == 1) 114.dp else 184.dp
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        ClockTextColumn(modifier = Modifier.widthIn(max = 236.dp))
+                                        MiniCardsGrid(modifier = Modifier.width(gridWidth))
+                                    }
+                                } else {
+                                    ClockTextColumn(modifier = Modifier.widthIn(max = 290.dp))
+                                    if (showMiniGrid) {
+                                        Spacer(Modifier.height(8.dp))
+                                        MiniCardsGrid(modifier = Modifier.width(if (miniCards.size == 1) 124.dp else 196.dp))
+                                    }
                                 }
                             }
 
@@ -370,47 +487,6 @@ fun HomeScreen(
                                             fontSize = 11.sp,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        // Middle-Right: Weather in macOS glass widget card
-                        if (state.weather.enabled) {
-                            Column(
-                                horizontalAlignment = Alignment.End,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(22.dp))
-                                    .background(barSurfaceBrush(state.theme), RoundedCornerShape(22.dp))
-                                    .border(1.dp, Color(0x3DFFFFFF), RoundedCornerShape(22.dp))
-                                    .padding(horizontal = 16.dp, vertical = 12.dp)
-                            ) {
-                                if (!state.weather.hasData) {
-                                    Text("…", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Light)
-                                    Text(
-                                        text = if (en) "Loading weather" else "Đang tải thời tiết",
-                                        color = LauncherColors.TextSecondary,
-                                        fontSize = 11.sp
-                                    )
-                                } else {
-                                    val desc = WeatherService.describe(state.weather.code, en)
-                                    Text(
-                                        text = "${desc.first} ${Math.round(state.weather.temp)}°C",
-                                        color = Color.White,
-                                        fontSize = 24.sp,
-                                        fontWeight = FontWeight.Light
-                                    )
-                                    Text(
-                                        text = "${desc.second} · ${Math.round(state.weather.min)}°/${Math.round(state.weather.max)}° · 💧${state.weather.rain}%",
-                                        color = LauncherColors.TextSecondary,
-                                        fontSize = 11.sp
-                                    )
-                                    if (state.weather.city.isNotEmpty()) {
-                                        Text(
-                                            text = state.weather.city,
-                                            color = LauncherColors.TextMuted,
-                                            fontSize = 11.sp
                                         )
                                     }
                                 }
@@ -842,29 +918,62 @@ fun HomeScreen(
                     }
 
                     if (state.gridApps.isNotEmpty()) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth(0.82f)
-                                .align(Alignment.CenterHorizontally)
-                        ) {
-                            Text(
-                                text = if (en) "All apps" else "Tất cả ứng dụng",
-                                color = Color(0xB3FFFFFF),
-                                fontSize = 14.sp,
-                                modifier = Modifier.padding(start = 12.dp, top = 12.dp, bottom = 10.dp)
-                            )
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 10.dp, bottom = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Text(
+                                    text = if (en) "All apps" else "Tất cả ứng dụng",
+                                    color = Color(0xCCFFFFFF),
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                val activeName = focusedGridAppLabel.ifBlank {
+                                    if (isAllAppsActive) state.focusedLabel else ""
+                                }
+                                if (activeName.isNotBlank()) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(LauncherColors.accent(state.theme).copy(alpha = 0.25f))
+                                            .border(
+                                                1.dp,
+                                                LauncherColors.accent(state.theme).copy(alpha = 0.72f),
+                                                RoundedCornerShape(10.dp)
+                                            )
+                                            .padding(horizontal = 12.dp, vertical = 4.dp)
+                                    ) {
+                                        Text(
+                                            text = activeName,
+                                            color = Color.White,
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                                Spacer(Modifier.weight(1f))
+                                Text(
+                                    text = "${state.gridApps.size} " + (if (en) "apps" else "ứng dụng"),
+                                    color = Color(0x88FFFFFF),
+                                    fontSize = 13.sp
+                                )
+                            }
 
                             val rows = state.gridApps.chunked(4)
                             Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 14.dp),
-                                verticalArrangement = Arrangement.spacedBy(14.dp)
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(16.dp)
                             ) {
                                 rows.forEachIndexed { rowIdx, rowApps ->
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(16.dp)
                                     ) {
                                         for (colIdx in 0 until 4) {
                                             val app = rowApps.getOrNull(colIdx)
@@ -887,7 +996,10 @@ fun HomeScreen(
                                                                 Modifier
                                                             }
                                                         ),
-                                                    onFocused = { onTileFocused(app.label) },
+                                                    onFocused = {
+                                                        focusedGridAppLabel = app.label
+                                                        onTileFocused(app.label)
+                                                    },
                                                     onClick = { onAppClick(app) },
                                                     onLongClick = { onAppLongClick(app) }
                                                 )
@@ -991,39 +1103,176 @@ private fun PresetGlowCanvas(idx: Int, alpha: Float) {
 }
 
 @Composable
-private fun SystemBarItem(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    percent: Int,
-    label: String
+fun ClockTimeText(
+    timeText: String,
+    fontStyle: ClockFontStyle,
+    bold: Boolean,
+    dashed: Boolean,
+    fontSize: TextUnit,
+    modifier: Modifier = Modifier
 ) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = Color(0xCCFFFFFF),
-            modifier = Modifier.size(10.dp)
+    val family = remember(fontStyle) { clockFontFamily(fontStyle) }
+    val weight = if (bold) FontWeight.Bold else FontWeight.Light
+    val density = LocalDensity.current
+
+    if (!dashed) {
+        Text(
+            text = timeText,
+            color = Color.White,
+            fontSize = fontSize,
+            fontFamily = family,
+            fontWeight = weight,
+            letterSpacing = (-1).sp,
+            maxLines = 1,
+            modifier = modifier
         )
-        Spacer(Modifier.width(5.dp))
-        Box(
-            modifier = Modifier
-                .width(36.dp)
-                .height(3.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(Color(0x33FFFFFF))
+    } else {
+        val strokeWidthPx = with(density) { (if (bold) 2.4.dp else 1.5.dp).toPx() }
+        val dashOnPx = with(density) { 5.5.dp.toPx() }
+        val dashOffPx = with(density) { 3.dp.toPx() }
+        Box(modifier = modifier) {
+            Text(
+                text = timeText,
+                style = TextStyle(
+                    color = Color(0x28FFFFFF),
+                    fontSize = fontSize,
+                    fontFamily = family,
+                    fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal,
+                    letterSpacing = (-1).sp
+                ),
+                maxLines = 1
+            )
+            Text(
+                text = timeText,
+                style = TextStyle(
+                    color = Color.White,
+                    fontSize = fontSize,
+                    fontFamily = family,
+                    fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal,
+                    letterSpacing = (-1).sp,
+                    drawStyle = Stroke(
+                        width = strokeWidthPx,
+                        cap = StrokeCap.Round,
+                        join = StrokeJoin.Round,
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(dashOnPx, dashOffPx), 0f)
+                    )
+                ),
+                maxLines = 1
+            )
+        }
+    }
+}
+
+private fun clockFontFamily(style: ClockFontStyle): FontFamily = when (style) {
+    ClockFontStyle.DEFAULT -> FontFamily.SansSerif
+    ClockFontStyle.OUTFIT -> FontFamily(Font(R.font.outfit))
+    ClockFontStyle.ORBITRON -> FontFamily(Font(R.font.orbitron))
+    ClockFontStyle.JETBRAINS_MONO -> FontFamily(Font(R.font.jetbrains_mono))
+    ClockFontStyle.PLAYFAIR -> FontFamily(Font(R.font.playfair_display))
+}
+
+private data class MiniCardSpec(
+    val dotColor: Color,
+    val label: String,
+    val badge: String,
+    val mainValue: String,
+    val subValue: String,
+    val progress: Float,
+    val sensorContentDescription: String? = null
+)
+
+@Composable
+private fun MiniStatCard(
+    spec: MiniCardSpec,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(0x1EFFFFFF), RoundedCornerShape(10.dp))
+            .border(1.dp, Color(0x42FFFFFF), RoundedCornerShape(10.dp))
+            .padding(horizontal = 6.dp, vertical = 4.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
         ) {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth((percent.coerceIn(0, 100) / 100f))
-                    .height(3.dp)
-                    .background(if (percent >= 90) LauncherColors.AlertRed else Color(0xE6FFFFFF))
+                    .size(6.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(spec.dotColor)
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(
+                text = spec.label,
+                color = Color(0xCCFFFFFF),
+                fontSize = 7.5.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.2.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            if (spec.sensorContentDescription != null) {
+                Spacer(Modifier.width(2.dp))
+                Icon(
+                    imageVector = Icons.Filled.Sensors,
+                    contentDescription = spec.sensorContentDescription,
+                    tint = Color(0xFF30D158),
+                    modifier = Modifier.size(10.dp)
+                )
+            }
+            if (spec.badge.isNotEmpty()) {
+                Spacer(Modifier.width(2.dp))
+                Text(
+                    text = spec.badge,
+                    color = Color(0xB8FFFFFF),
+                    fontSize = 7.sp,
+                    maxLines = 1
+                )
+            }
+        }
+        Spacer(Modifier.height(1.dp))
+        Row(
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(
+                text = spec.mainValue,
+                color = Color.White,
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1
+            )
+            if (spec.subValue.isNotEmpty()) {
+                Text(
+                    text = spec.subValue,
+                    color = Color(0xD9FFFFFF),
+                    fontSize = 8.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(bottom = 0.5.dp)
+                )
+            }
+        }
+        Spacer(Modifier.height(2.5.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(2.5.dp)
+                .clip(RoundedCornerShape(1.5.dp))
+                .background(Color(0x30FFFFFF))
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(spec.progress.coerceIn(0f, 1f))
+                    .height(2.5.dp)
+                    .clip(RoundedCornerShape(1.5.dp))
+                    .background(spec.dotColor)
             )
         }
-        Spacer(Modifier.width(5.dp))
-        Text(
-            text = label,
-            color = Color(0xB3FFFFFF),
-            fontSize = 8.sp
-        )
     }
 }
 

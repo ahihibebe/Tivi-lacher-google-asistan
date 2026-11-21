@@ -20,6 +20,7 @@ object WeatherService {
         val max: Double,
         val code: Int,
         val rain: Int,
+        val humidity: Int,
         val city: String
     )
 
@@ -64,7 +65,7 @@ object WeatherService {
         val url = String.format(
             Locale.US,
             "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f" +
-                "&current=temperature_2m,weather_code" +
+                "&current=temperature_2m,relative_humidity_2m,weather_code" +
                 "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max" +
                 "&timezone=auto&forecast_days=1",
             lat,
@@ -75,12 +76,14 @@ object WeatherService {
         val daily = j.getJSONObject("daily")
         val rainArr = daily.optJSONArray("precipitation_probability_max")
         val rain = if (rainArr != null && !rainArr.isNull(0)) rainArr.getInt(0) else 0
+        val humidity = cur.optInt("relative_humidity_2m", 0).coerceIn(0, 100)
         return Data(
             temp = cur.getDouble("temperature_2m"),
             code = cur.getInt("weather_code"),
             min = daily.getJSONArray("temperature_2m_min").getDouble(0),
             max = daily.getJSONArray("temperature_2m_max").getDouble(0),
             rain = rain,
+            humidity = humidity,
             city = city ?: ""
         )
     }

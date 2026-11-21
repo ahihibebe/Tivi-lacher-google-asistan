@@ -17,6 +17,18 @@ enum class LauncherTheme(val id: Int) {
     }
 }
 
+enum class ClockFontStyle(val id: String) {
+    DEFAULT("default"),
+    OUTFIT("outfit"),
+    ORBITRON("orbitron"),
+    JETBRAINS_MONO("mono"),
+    PLAYFAIR("serif");
+
+    companion object {
+        fun fromId(id: String?): ClockFontStyle = entries.firstOrNull { it.id == id } ?: DEFAULT
+    }
+}
+
 enum class DockTab(val index: Int) {
     APPS(0),
     RECENTS(1),
@@ -53,6 +65,7 @@ data class WeatherState(
     val max: Double = 0.0,
     val code: Int = 0,
     val rain: Int = 0,
+    val humidity: Int = 0,
     val city: String = ""
 )
 
@@ -117,6 +130,7 @@ data class DisplayPrefs(
     val musicFrameOn: Boolean = true,
     val photoFrameOn: Boolean = true,
     val weatherOn: Boolean = true,
+    val humidityOn: Boolean = true,
     val wifiOn: Boolean = true,
     val voiceOn: Boolean = true,
     val musicOn: Boolean = true,
@@ -124,7 +138,10 @@ data class DisplayPrefs(
     val holidayOn: Boolean = true,
     val lunarAlertOn: Boolean = true,
     val nameOn: Boolean = true,
-    val soundOn: Boolean = true
+    val soundOn: Boolean = true,
+    val clockFont: ClockFontStyle = ClockFontStyle.DEFAULT,
+    val clockBold: Boolean = false,
+    val clockDashed: Boolean = false
 )
 
 data class PriceSection(
@@ -212,6 +229,7 @@ sealed interface ActiveDialog {
     data class PersonalAiKeyConfig(val returnQuery: String?) : ActiveDialog
     data class QrApiKeyUpload(val url: String, val qrBitmap: Bitmap?, val returnQuery: String?) : ActiveDialog
     data object DisplayMenu : ActiveDialog
+    data object ClockStyleMenu : ActiveDialog
     data object ChooseProvince : ActiveDialog
     data class ChooseWard(
         val province: AdminData.Province,
@@ -274,7 +292,17 @@ data class LauncherUiState(
     val volumeMax: Int = 15,
     val localIp: String? = null,
     val hasPersonalAiKey: Boolean = false,
-    val maskedPersonalAiKey: String = ""
+    val maskedPersonalAiKey: String = "",
+    val deviceClimate: DeviceClimateState = DeviceClimateState()
 ) {
     val isEnglish: Boolean get() = lang == "en"
+}
+
+data class DeviceClimateState(
+    val hasTempSensor: Boolean = false,
+    val hasHumiditySensor: Boolean = false,
+    val tempC: Double? = null,
+    val humidity: Int? = null
+) {
+    val hasAnySensor: Boolean get() = hasTempSensor || hasHumiditySensor
 }

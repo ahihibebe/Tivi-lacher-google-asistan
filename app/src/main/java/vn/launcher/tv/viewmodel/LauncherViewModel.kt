@@ -15,6 +15,10 @@ import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.hardware.usb.UsbConstants
 import android.hardware.usb.UsbManager
 import android.media.AudioAttributes
@@ -70,6 +74,8 @@ import vn.launcher.tv.data.VoiceCommand
 import vn.launcher.tv.data.WeatherService
 import vn.launcher.tv.model.ActiveDialog
 import vn.launcher.tv.model.AppItem
+import vn.launcher.tv.model.ClockFontStyle
+import vn.launcher.tv.model.DeviceClimateState
 import vn.launcher.tv.model.DisplayPrefs
 import vn.launcher.tv.model.DockTab
 import vn.launcher.tv.model.HeaderState
@@ -97,6 +103,8 @@ import java.security.SecureRandom
 import java.util.Calendar
 import java.util.Locale
 import java.util.TreeSet
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 sealed interface LauncherEvent {
     data class ShowToast(val message: String) : LauncherEvent
@@ -160,6 +168,49 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     private var currentResolvedProvince: String? = null
     private var priceSpokenForOpen: Boolean = false
 
+    private var sensorManager: SensorManager? = null
+    private var sensorsRegistered: Boolean = false
+    private var lastSensorTempUpdateMs: Long = 0L
+    private var lastSensorHumUpdateMs: Long = 0L
+    private var lastSensorTempC: Double? = null
+    private var lastSensorHumidity: Int? = null
+
+    private val climateSensorListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent?) {
+            val ev = event ?: return
+            val raw = ev.values.firstOrNull() ?: return
+            if (raw.isNaN() || raw.isInfinite()) return
+            val now = android.os.SystemClock.elapsedRealtime()
+            when (ev.sensor.type) {
+                Sensor.TYPE_AMBIENT_TEMPERATURE -> {
+                    if (raw !in -60f..100f) return
+                    val tempC = (raw * 10f).roundToInt() / 10.0
+                    val prev = lastSensorTempC
+                    if (prev == null || abs(tempC - prev) >= 0.1 || now - lastSensorTempUpdateMs >= 1500L) {
+                        lastSensorTempC = tempC
+                        lastSensorTempUpdateMs = now
+                        _uiState.update {
+                            it.copy(deviceClimate = it.deviceClimate.copy(tempC = tempC))
+                        }
+                    }
+                }
+                Sensor.TYPE_RELATIVE_HUMIDITY -> {
+                    val pct = raw.roundToInt().coerceIn(0, 100)
+                    val prev = lastSensorHumidity
+                    if (prev == null || pct != prev || now - lastSensorHumUpdateMs >= 1500L) {
+                        lastSensorHumidity = pct
+                        lastSensorHumUpdateMs = now
+                        _uiState.update {
+                            it.copy(deviceClimate = it.deviceClimate.copy(humidity = pct))
+                        }
+                    }
+                }
+            }
+        }
+
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+    }
+
     init {
         val safeMode = CrashGuard.recent(app, 60_000L)
         initSounds()
@@ -168,6 +219,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         updateHeader()
         showCachedWeather()
         if (!safeMode) {
+            startClimateSensors()
             startPolling()
             startCardSlides()
         } else {
@@ -211,6 +263,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                     musicFrameOn = prefs.getBoolean("musicFrameOn", true),
                     photoFrameOn = prefs.getBoolean("photoFrameOn", true),
                     weatherOn = prefs.getBoolean("weatherOn", true),
+                    humidityOn = prefs.getBoolean("humidityOn", true),
                     wifiOn = prefs.getBoolean("wifiOn", true),
                     voiceOn = prefs.getBoolean("voiceOn", true),
                     musicOn = prefs.getBoolean("musicOn", true),
@@ -218,7 +271,10 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                     holidayOn = prefs.getBoolean("holidayOn", true),
                     lunarAlertOn = prefs.getBoolean("lunarAlertOn", true),
                     nameOn = prefs.getBoolean("nameOn", true),
-                    soundOn = prefs.getBoolean("sound", true)
+                    soundOn = prefs.getBoolean("sound", true),
+                    clockFont = ClockFontStyle.fromId(prefs.getString("clockFont", ClockFontStyle.DEFAULT.id)),
+                    clockBold = prefs.getBoolean("clockBold", false),
+                    clockDashed = prefs.getBoolean("clockDashed", false)
                 ),
                 tvChannels = listOf(
                     TvChannelSlot(0, chName(0), chLink(0)),
@@ -280,6 +336,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
             updateStatusPills()
             showCachedWeather()
             maybeFetchWeather(force = false)
+            startClimateSensors()
             startCardSlides()
             startPolling()
         }
@@ -288,7 +345,49 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     fun onPause() {
         pollingJob?.cancel()
         slideCardJob?.cancel()
+        stopClimateSensors()
         stopUploadServer()
+    }
+
+    private fun startClimateSensors() {
+        try {
+            val sm = sensorManager ?: (app.getSystemService(Context.SENSOR_SERVICE) as? SensorManager)
+                ?.also { sensorManager = it }
+            val tempSensor = sm?.getDefaultSensor(Sensor.TYPE_AMBIENT_TEMPERATURE)
+            val humSensor = sm?.getDefaultSensor(Sensor.TYPE_RELATIVE_HUMIDITY)
+            val hasTemp = tempSensor != null
+            val hasHum = humSensor != null
+            _uiState.update {
+                it.copy(
+                    deviceClimate = it.deviceClimate.copy(
+                        hasTempSensor = hasTemp,
+                        hasHumiditySensor = hasHum
+                    )
+                )
+            }
+            if (!prefs.getBoolean("humidityOn", true) || (!hasTemp && !hasHum) || sensorsRegistered) {
+                return
+            }
+            var registered = false
+            if (tempSensor != null && sm.registerListener(climateSensorListener, tempSensor, SensorManager.SENSOR_DELAY_NORMAL)) {
+                registered = true
+            }
+            if (humSensor != null && sm.registerListener(climateSensorListener, humSensor, SensorManager.SENSOR_DELAY_NORMAL)) {
+                registered = true
+            }
+            sensorsRegistered = registered
+        } catch (_: Throwable) {
+        }
+    }
+
+    private fun stopClimateSensors() {
+        if (!sensorsRegistered) return
+        try {
+            sensorManager?.unregisterListener(climateSensorListener)
+        } catch (_: Throwable) {
+        } finally {
+            sensorsRegistered = false
+        }
     }
 
     fun onHomePressed() {
@@ -610,6 +709,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                     max = prefs.getFloat("w_max", 0f).toDouble(),
                     code = prefs.getInt("w_code", 0),
                     rain = prefs.getInt("w_rain", 0),
+                    humidity = prefs.getInt("w_humidity", 0),
                     city = prefs.getString("w_city", "") ?: ""
                 )
             )
@@ -617,11 +717,13 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun maybeFetchWeather(force: Boolean) {
-        if (!prefs.getBoolean("weatherOn", true) || weatherBusy) return
+        val needWeather = prefs.getBoolean("weatherOn", true) || prefs.getBoolean("humidityOn", true)
+        if (!needWeather || weatherBusy) return
         val now = System.currentTimeMillis()
         if (!force) {
             if (now - lastWeatherAttempt < 5 * 60 * 1000L) return
-            if (now - prefs.getLong("w_time", 0L) < 30 * 60 * 1000L) return
+            val hasHumidityCache = prefs.contains("w_humidity")
+            if (hasHumidityCache && now - prefs.getLong("w_time", 0L) < 30 * 60 * 1000L) return
         }
         lastWeatherAttempt = now
         weatherBusy = true
@@ -638,6 +740,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                     .putFloat("w_max", d.max.toFloat())
                     .putInt("w_code", d.code)
                     .putInt("w_rain", d.rain)
+                    .putInt("w_humidity", d.humidity)
                     .putString("w_city", d.city)
                     .putLong("w_time", System.currentTimeMillis())
                     .apply()
@@ -1211,6 +1314,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
             "musicFrameOn" -> d.copy(musicFrameOn = now)
             "photoFrameOn" -> d.copy(photoFrameOn = now)
             "weatherOn" -> d.copy(weatherOn = now)
+            "humidityOn" -> d.copy(humidityOn = now)
             "wifiOn" -> d.copy(wifiOn = now)
             "voiceOn" -> d.copy(voiceOn = now)
             "musicOn" -> d.copy(musicOn = now)
@@ -1228,6 +1332,15 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                 showCachedWeather()
                 if (now) maybeFetchWeather(force = true)
             }
+            "humidityOn" -> {
+                if (now) {
+                    startClimateSensors()
+                    showCachedWeather()
+                    maybeFetchWeather(force = true)
+                } else {
+                    stopClimateSensors()
+                }
+            }
             "wifiOn" -> updateNetwork()
             "musicOn" -> updateStatusPills()
             "barsOn" -> {
@@ -1239,6 +1352,26 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                 if (now) startCardSlides() else slideCardJob?.cancel()
             }
         }
+    }
+
+    fun setClockFont(style: ClockFontStyle) {
+        prefs.edit().putString("clockFont", style.id).apply()
+        playSelect()
+        _uiState.update { it.copy(display = it.display.copy(clockFont = style)) }
+    }
+
+    fun toggleClockBold() {
+        val now = !_uiState.value.display.clockBold
+        prefs.edit().putBoolean("clockBold", now).apply()
+        playSelect()
+        _uiState.update { it.copy(display = it.display.copy(clockBold = now)) }
+    }
+
+    fun toggleClockDashed() {
+        val now = !_uiState.value.display.clockDashed
+        prefs.edit().putBoolean("clockDashed", now).apply()
+        playSelect()
+        _uiState.update { it.copy(display = it.display.copy(clockDashed = now)) }
     }
 
     fun setVolume(level: Int) {
@@ -2992,6 +3125,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
             val i = e.indexOf(':')
             if (i <= 0) continue
             val code = e.substring(0, i).toIntOrNull() ?: continue
+            if (isReservedKey(code)) continue
             m[code] = e.substring(i + 1)
         }
         return m
@@ -3025,11 +3159,13 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun isVoiceKeyShortcut(keyCode: Int): Boolean {
+        if (isReservedKey(keyCode)) return false
         val pkg = _uiState.value.keyShortcuts[keyCode]
         return pkg == "@voice" || pkg == "@assistant"
     }
 
     fun launchByKey(keyCode: Int): Boolean {
+        if (isReservedKey(keyCode)) return false
         val pkg = _uiState.value.keyShortcuts[keyCode] ?: return false
         if (pkg == "@voice") {
             if (_uiState.value.slideshow.fullscreenOpen) closeFullscreenSlideshow()
@@ -3062,7 +3198,8 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT,
         KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER,
         KeyEvent.KEYCODE_NUMPAD_ENTER, KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_HOME,
-        KeyEvent.KEYCODE_ESCAPE, KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_CHANNEL_DOWN,
+        KeyEvent.KEYCODE_ESCAPE, KeyEvent.KEYCODE_BUTTON_B, KeyEvent.KEYCODE_NAVIGATE_OUT,
+        KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_CHANNEL_DOWN,
         KeyEvent.KEYCODE_PAGE_UP, KeyEvent.KEYCODE_PAGE_DOWN, KeyEvent.KEYCODE_VOLUME_UP,
         KeyEvent.KEYCODE_VOLUME_DOWN, KeyEvent.KEYCODE_VOLUME_MUTE, KeyEvent.KEYCODE_POWER,
         KeyEvent.KEYCODE_UNKNOWN -> true
@@ -3114,6 +3251,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
 
     override fun onCleared() {
         super.onCleared()
+        stopClimateSensors()
         stopUploadServer()
         releasePlayer()
         tts?.shutdown()
