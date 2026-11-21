@@ -17,6 +17,8 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -1615,7 +1617,9 @@ private fun AiAnswerBoardDialog(
                         CircularProgressIndicator(color = accent, modifier = Modifier.size(24.dp))
                         Spacer(Modifier.width(12.dp))
                         Text(
-                            text = if (en) "Asking Google AI…" else "Google AI đang tìm câu trả lời…",
+                            text = dialog.statusText.ifBlank {
+                                if (en) "Asking Google AI…" else "Google AI đang tìm câu trả lời…"
+                            },
                             color = Color(0xE6FFFFFF),
                             fontSize = 15.sp
                         )
@@ -1654,16 +1658,24 @@ private fun AiAnswerBoardDialog(
 
         Spacer(Modifier.height(14.dp))
 
-        Row(
+        @OptIn(ExperimentalLayoutApi::class)
+        FlowRow(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-            verticalAlignment = Alignment.CenterVertically
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             if (!dialog.errorMessage.isNullOrBlank() && dialog.isAppCheckError) {
                 MacActionButton(
                     text = "App Check",
                     color = Color(0x55FF9F0A),
                     onClick = { vm.openAppCheckConfig(dialog.query) }
+                )
+            }
+            if (!dialog.loading && !dialog.errorMessage.isNullOrBlank()) {
+                MacActionButton(
+                    text = if (en) "Retry" else "Thử lại",
+                    color = Color(0x5534C759),
+                    onClick = { vm.askGoogleAi(dialog.query) }
                 )
             }
             MacActionButton(

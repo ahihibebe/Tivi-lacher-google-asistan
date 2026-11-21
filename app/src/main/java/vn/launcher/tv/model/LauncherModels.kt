@@ -202,6 +202,7 @@ sealed interface ActiveDialog {
         val query: String,
         val answerText: String = "",
         val spokenText: String = "",
+        val statusText: String = "",
         val loading: Boolean = true,
         val errorMessage: String? = null,
         val isAppCheckError: Boolean = false

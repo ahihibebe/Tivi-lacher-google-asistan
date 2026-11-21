@@ -2082,27 +2082,43 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
             it.copy(
                 activeDialog = ActiveDialog.AiAnswerBoard(
                     query = q,
+                    statusText = if (en) "Connecting to Google AI…" else "Đang kết nối Google AI…",
                     loading = true
                 )
             )
         }
         aiFetchJob = viewModelScope.launch {
-            val res = GeminiAiService.askStreaming(app, q, en) { partial ->
-                _uiState.update { st ->
-                    val cur = st.activeDialog
-                    if (cur is ActiveDialog.AiAnswerBoard && cur.query == q) {
-                        st.copy(
-                            activeDialog = cur.copy(
-                                answerText = partial,
-                                loading = true,
-                                errorMessage = null
+            val res = GeminiAiService.askStreaming(
+                context = app,
+                query = q,
+                isEnglish = en,
+                onStatus = { status ->
+                    _uiState.update { st ->
+                        val cur = st.activeDialog
+                        if (cur is ActiveDialog.AiAnswerBoard && cur.query == q) {
+                            st.copy(activeDialog = cur.copy(statusText = status))
+                        } else {
+                            st
+                        }
+                    }
+                },
+                onPartialText = { partial ->
+                    _uiState.update { st ->
+                        val cur = st.activeDialog
+                        if (cur is ActiveDialog.AiAnswerBoard && cur.query == q) {
+                            st.copy(
+                                activeDialog = cur.copy(
+                                    answerText = partial,
+                                    loading = true,
+                                    errorMessage = null
+                                )
                             )
-                        )
-                    } else {
-                        st
+                        } else {
+                            st
+                        }
                     }
                 }
-            }
+            )
             val cur = _uiState.value.activeDialog
             if (cur is ActiveDialog.AiAnswerBoard && cur.query == q) {
                 _uiState.update {

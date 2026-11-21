@@ -8,7 +8,12 @@ import com.google.firebase.FirebaseApp
 import com.google.firebase.appcheck.FirebaseAppCheck
 import com.google.firebase.appcheck.debug.DebugAppCheckProviderFactory
 import com.google.firebase.appcheck.recaptcha.RecaptchaAppCheckProviderFactory
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import vn.launcher.tv.BuildConfig
 import java.util.UUID
@@ -33,6 +38,14 @@ enum class AppCheckMode {
     RECAPTCHA,
     UNCONFIGURED
 }
+
+sealed interface AppCheckCheckResult {
+    data object Ready : AppCheckCheckResult
+    data object TimedOut : AppCheckCheckResult
+    data class Failed(val message: String?) : AppCheckCheckResult
+}
+
+private val warmUpScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
 @Volatile
 private var currentAppCheckMode: AppCheckMode = AppCheckMode.UNCONFIGURED
@@ -111,6 +124,18 @@ fun configureAppCheck(context: Context, intent: Intent?) {
     }
 }
 
+/**
+ * Non-blocking warm-up so reCAPTCHA / Debug token attestation initializes in the
+ * background when the launcher starts instead of blocking the user's first AI query.
+ */
+fun prewarmAppCheck(context: Context) {
+    val appCtx = context.applicationContext
+    warmUpScope.launch {
+        if (currentAppCheckMode == AppCheckMode.UNCONFIGURED) return@launch
+        awaitAppCheckReady(appCtx, timeoutMs = 15_000L)
+    }
+}
+
 fun getCustomDebugToken(context: Context): String? {
     val prefs = context.applicationContext.getSharedPreferences(CUSTOM_PREFS, Context.MODE_PRIVATE)
     return prefs.getString(KEY_CUSTOM_DEBUG_TOKEN, null)?.trim()?.takeIf { it.isNotEmpty() }
@@ -141,25 +166,47 @@ fun saveCustomDebugTokenAndReconfigure(context: Context, rawToken: String?) {
         else putString(KEY_CUSTOM_DEBUG_TOKEN, cleaned)
     }.commit()
     configureAppCheck(appCtx, null)
+    prewarmAppCheck(appCtx)
 }
 
-suspend fun diagnoseAppCheckTokenError(context: Context): String? {
-    if (FirebaseApp.getApps(context).isEmpty()) return null
-    return withTimeoutOrNull(8_000L) {
-        suspendCancellableCoroutine { cont ->
+suspend fun awaitAppCheckReady(
+    context: Context,
+    timeoutMs: Long = 15_000L
+): AppCheckCheckResult = withContext(Dispatchers.IO) {
+    if (FirebaseApp.getApps(context).isEmpty()) {
+        return@withContext AppCheckCheckResult.Failed("FirebaseApp is not initialized.")
+    }
+    if (currentAppCheckMode == AppCheckMode.UNCONFIGURED) {
+        return@withContext AppCheckCheckResult.Failed("App Check provider is unconfigured.")
+    }
+    val res = withTimeoutOrNull(timeoutMs) {
+        suspendCancellableCoroutine<AppCheckCheckResult> { cont ->
             try {
                 FirebaseAppCheck.getInstance()
                     .getAppCheckToken(false)
                     .addOnSuccessListener {
-                        if (cont.isActive) cont.resume(null)
+                        if (cont.isActive) cont.resume(AppCheckCheckResult.Ready)
                     }
                     .addOnFailureListener { err ->
-                        if (cont.isActive) cont.resume(err.localizedMessage ?: err.message)
+                        if (cont.isActive) {
+                            cont.resume(AppCheckCheckResult.Failed(err.localizedMessage ?: err.message))
+                        }
                     }
             } catch (e: Exception) {
-                if (cont.isActive) cont.resume(e.localizedMessage ?: e.message)
+                if (cont.isActive) {
+                    cont.resume(AppCheckCheckResult.Failed(e.localizedMessage ?: e.message))
+                }
             }
         }
+    }
+    res ?: AppCheckCheckResult.TimedOut
+}
+
+suspend fun diagnoseAppCheckTokenError(context: Context): String? {
+    return when (val r = awaitAppCheckReady(context, timeoutMs = 8_000L)) {
+        AppCheckCheckResult.Ready -> null
+        AppCheckCheckResult.TimedOut -> "App Check token request timed out."
+        is AppCheckCheckResult.Failed -> r.message
     }
 }
 

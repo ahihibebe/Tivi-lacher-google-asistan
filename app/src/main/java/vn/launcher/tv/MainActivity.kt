@@ -30,6 +30,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import vn.launcher.tv.data.CrashGuard
 import vn.launcher.tv.data.configureAppCheck
+import vn.launcher.tv.data.prewarmAppCheck
 import vn.launcher.tv.model.ActiveDialog
 import vn.launcher.tv.ui.screens.ActiveDialogHost
 import vn.launcher.tv.ui.screens.FullscreenSlideshowDialog
@@ -114,6 +115,7 @@ class MainActivity : ComponentActivity() {
 
         // Configure App Check with launch intent before any UI, ViewModels, or Firebase operations
         configureAppCheck(this, intent)
+        prewarmAppCheck(this)
 
         enableEdgeToEdge()
 
@@ -212,6 +214,7 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         if (intent.hasExtra("FIREBASE_APPCHECK_DEBUG_TOKEN")) {
             configureAppCheck(this, intent)
+            prewarmAppCheck(this)
         }
         vm.onHomePressed()
     }
