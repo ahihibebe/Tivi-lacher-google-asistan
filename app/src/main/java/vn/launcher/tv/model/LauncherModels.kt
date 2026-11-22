@@ -314,7 +314,8 @@ data class DeviceClimateState(
     val hasTempSensor: Boolean = false,
     val hasHumiditySensor: Boolean = false,
     val tempC: Double? = null,
-    val humidity: Int? = null
+    val humidity: Int? = null,
+    val sensorDiagnostic: String = ""
 ) {
     val hasAnySensor: Boolean get() = hasTempSensor || hasHumiditySensor
 }

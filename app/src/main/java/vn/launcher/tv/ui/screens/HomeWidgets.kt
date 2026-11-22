@@ -247,9 +247,9 @@ internal fun MiniStatCard(
     spec: MiniCardSpec,
     modifier: Modifier = Modifier
 ) {
-    val corner = if (spec.expanded) 11.dp else 9.dp
-    val hPad = if (spec.expanded) 7.dp else 5.dp
-    val vPad = if (spec.expanded) 4.5.dp else 3.5.dp
+    val corner = if (spec.expanded) 11.dp else 10.dp
+    val hPad = if (spec.expanded) 8.dp else 7.dp
+    val vPad = if (spec.expanded) 5.dp else 4.dp
 
     Column(
         modifier = modifier
@@ -260,50 +260,60 @@ internal fun MiniStatCard(
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Box(
-                modifier = Modifier
-                    .size(if (spec.expanded) 5.5.dp else 5.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(spec.dotColor)
-            )
-            Spacer(Modifier.width(if (spec.expanded) 3.5.dp else 3.dp))
-            Text(
-                text = spec.label,
-                color = Color(0xD9FFFFFF),
-                fontSize = if (spec.expanded) 7.8.sp else 6.8.sp,
-                lineHeight = if (spec.expanded) 9.5.sp else 8.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = if (spec.expanded) 0.2.sp else 0.1.sp,
-                maxLines = if (spec.expanded) 2 else 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
-            )
-            if (spec.sourceIcon != null) {
-                Spacer(Modifier.width(2.dp))
-                Icon(
-                    imageVector = spec.sourceIcon,
-                    contentDescription = spec.sourceContentDescription,
-                    tint = spec.sourceIconTint,
-                    modifier = Modifier.size(9.5.dp)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f, fill = false)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(if (spec.expanded) 5.5.dp else 5.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(spec.dotColor)
+                )
+                Spacer(Modifier.width(if (spec.expanded) 4.dp else 3.5.dp))
+                Text(
+                    text = spec.label,
+                    color = Color(0xD9FFFFFF),
+                    fontSize = if (spec.expanded) 7.8.sp else 7.sp,
+                    lineHeight = if (spec.expanded) 9.5.sp else 8.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = if (spec.expanded) 0.2.sp else 0.1.sp,
+                    maxLines = if (spec.expanded) 2 else 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
-            if (spec.badge.isNotEmpty()) {
-                Spacer(Modifier.width(3.dp))
-                Text(
-                    text = spec.badge,
-                    color = Color(0xCCFFFFFF),
-                    fontSize = if (spec.expanded) 7.2.sp else 6.8.sp,
-                    maxLines = 1
-                )
+            if (spec.sourceIcon != null || spec.badge.isNotEmpty()) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(start = 5.dp)
+                ) {
+                    if (spec.sourceIcon != null) {
+                        Icon(
+                            imageVector = spec.sourceIcon,
+                            contentDescription = spec.sourceContentDescription,
+                            tint = spec.sourceIconTint,
+                            modifier = Modifier.size(9.5.dp)
+                        )
+                    }
+                    if (spec.badge.isNotEmpty()) {
+                        if (spec.sourceIcon != null) Spacer(Modifier.width(3.dp))
+                        Text(
+                            text = spec.badge,
+                            color = Color(0xCCFFFFFF),
+                            fontSize = if (spec.expanded) 7.2.sp else 6.8.sp,
+                            maxLines = 1
+                        )
+                    }
+                }
             }
         }
-        Spacer(Modifier.height(if (spec.expanded) 2.dp else 1.5.dp))
+        Spacer(Modifier.height(if (spec.expanded) 2.5.dp else 2.dp))
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(if (spec.expanded) 3.dp else 2.5.dp),
-            modifier = Modifier.fillMaxWidth()
+            horizontalArrangement = Arrangement.spacedBy(if (spec.expanded) 3.5.dp else 2.5.dp)
         ) {
             if (spec.mainIcon != null) {
                 Icon(

@@ -47,6 +47,7 @@ import vn.launcher.tv.R
 import vn.launcher.tv.data.AdbLocal
 import vn.launcher.tv.data.AdminData
 import vn.launcher.tv.data.CrashGuard
+import vn.launcher.tv.data.DeviceClimateReader
 import vn.launcher.tv.data.GeminiAiService
 import vn.launcher.tv.data.Holidays
 import vn.launcher.tv.data.LunarCalendar
@@ -158,21 +159,23 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     private var dynamicSensorCallback: SensorManager.DynamicSensorCallback? = null
     private var lastSensorTempUpdateMs: Long = 0L
     private var lastSensorHumUpdateMs: Long = 0L
+    private var lastSysfsPollMs: Long = 0L
     private var lastSensorTempC: Double? = null
     private var lastSensorHumidity: Int? = null
+    private var discoveredTempSensors: List<Sensor> = emptyList()
+    private var discoveredHumSensors: List<Sensor> = emptyList()
 
     private val climateSensorListener = object : SensorEventListener {
         override fun onSensorChanged(event: SensorEvent?) {
             val ev = event ?: return
-            val raw = ev.values.firstOrNull() ?: return
-            if (raw.isNaN() || raw.isInfinite()) return
-            val now = android.os.SystemClock.elapsedRealtime()
             val s = ev.sensor
-            val isTemp = s in registeredTempSensors || s.type == Sensor.TYPE_AMBIENT_TEMPERATURE
-            val isHum = s in registeredHumSensors || s.type == Sensor.TYPE_RELATIVE_HUMIDITY
-            if (isTemp) {
-                if (raw !in -60f..100f) return
-                val tempC = (raw * 10f).roundToInt() / 10.0
+            val parsed = DeviceClimateReader.parseSensorEvent(
+                ev = ev,
+                isRegisteredTemp = s in registeredTempSensors,
+                isRegisteredHum = s in registeredHumSensors
+            )
+            val now = android.os.SystemClock.elapsedRealtime()
+            parsed.tempC?.let { tempC ->
                 val prev = lastSensorTempC
                 if (prev == null || abs(tempC - prev) >= 0.1 || now - lastSensorTempUpdateMs >= 1500L) {
                     lastSensorTempC = tempC
@@ -186,8 +189,8 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                         )
                     }
                 }
-            } else if (isHum) {
-                val pct = raw.roundToInt().coerceIn(0, 100)
+            }
+            parsed.humidity?.let { pct ->
                 val prev = lastSensorHumidity
                 if (prev == null || pct != prev || now - lastSensorHumUpdateMs >= 1500L) {
                     lastSensorHumidity = pct
@@ -346,62 +349,51 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         stopUploadServer()
     }
 
-    private fun isAmbientTempSensor(s: Sensor): Boolean {
-        if (s.type == Sensor.TYPE_AMBIENT_TEMPERATURE) return true
-        val meta = "${s.stringType} ${s.name}".lowercase(Locale.ROOT)
-        @Suppress("DEPRECATION")
-        if (s.type == Sensor.TYPE_TEMPERATURE) {
-            // Exclude internal CPU/GPU/battery thermal sensors on TV boxes when using legacy TYPE_TEMPERATURE
-            return !meta.contains("cpu") && !meta.contains("gpu") && !meta.contains("soc") &&
-                !meta.contains("battery") && !meta.contains("skin") && !meta.contains("board")
-        }
-        return meta.contains("ambient_temperature") ||
-            (meta.contains("temp") && (meta.contains("ambient") || meta.contains("room") ||
-                meta.contains("sht") || meta.contains("bme") || meta.contains("dht") ||
-                meta.contains("aht") || meta.contains("hdc")))
-    }
-
-    private fun isHumiditySensor(s: Sensor): Boolean {
-        if (s.type == Sensor.TYPE_RELATIVE_HUMIDITY) return true
-        val meta = "${s.stringType} ${s.name}".lowercase(Locale.ROOT)
-        return meta.contains("relative_humidity") || meta.contains("humidity") || meta.contains("humid")
-    }
-
     private fun startClimateSensors() {
         try {
             val sm = sensorManager ?: (app.getSystemService(Context.SENSOR_SERVICE) as? SensorManager)
-                ?.also { sensorManager = it } ?: return
+                ?.also { sensorManager = it }
 
-            val allCandidates = LinkedHashSet<Sensor>().apply {
-                sm.getDefaultSensor(Sensor.TYPE_AMBIENT_TEMPERATURE)?.let(::add)
-                sm.getDefaultSensor(Sensor.TYPE_AMBIENT_TEMPERATURE, true)?.let(::add)
-                sm.getDefaultSensor(Sensor.TYPE_RELATIVE_HUMIDITY)?.let(::add)
-                sm.getDefaultSensor(Sensor.TYPE_RELATIVE_HUMIDITY, true)?.let(::add)
-                addAll(sm.getSensorList(Sensor.TYPE_ALL))
+            val allCandidates = LinkedHashSet<Sensor>()
+            if (sm != null) {
+                sm.getDefaultSensor(Sensor.TYPE_AMBIENT_TEMPERATURE)?.let(allCandidates::add)
+                sm.getDefaultSensor(Sensor.TYPE_AMBIENT_TEMPERATURE, true)?.let(allCandidates::add)
+                sm.getDefaultSensor(Sensor.TYPE_RELATIVE_HUMIDITY)?.let(allCandidates::add)
+                sm.getDefaultSensor(Sensor.TYPE_RELATIVE_HUMIDITY, true)?.let(allCandidates::add)
+                @Suppress("DEPRECATION")
+                sm.getDefaultSensor(Sensor.TYPE_TEMPERATURE)?.let(allCandidates::add)
+                allCandidates.addAll(sm.getSensorList(Sensor.TYPE_ALL))
                 if (sm.isDynamicSensorDiscoverySupported) {
-                    addAll(sm.getDynamicSensorList(Sensor.TYPE_ALL))
+                    allCandidates.addAll(sm.getDynamicSensorList(Sensor.TYPE_ALL))
                 }
             }
 
-            val tempSensors = allCandidates.filter(::isAmbientTempSensor)
-            val humSensors = allCandidates.filter(::isHumiditySensor)
+            val tempSensors = allCandidates.filter(DeviceClimateReader::isAmbientTempSensor)
+            val humSensors = allCandidates.filter(DeviceClimateReader::isHumiditySensor)
+            discoveredTempSensors = tempSensors
+            discoveredHumSensors = humSensors
 
             _uiState.update {
                 it.copy(
                     deviceClimate = it.deviceClimate.copy(
-                        hasTempSensor = tempSensors.isNotEmpty(),
-                        hasHumiditySensor = humSensors.isNotEmpty()
+                        hasTempSensor = it.deviceClimate.hasTempSensor || tempSensors.isNotEmpty(),
+                        hasHumiditySensor = it.deviceClimate.hasHumiditySensor || humSensors.isNotEmpty(),
+                        sensorDiagnostic = DeviceClimateReader.buildSensorDiagnostic(sm, tempSensors, humSensors, null)
                     )
                 )
             }
 
             val source = ClimateDataSource.fromId(prefs.getString("climateSource", ClimateDataSource.AUTO.id))
-            if (!prefs.getBoolean("humidityOn", true) || source == ClimateDataSource.WEB || sensorsRegistered) return
+            if (!prefs.getBoolean("humidityOn", true) || source == ClimateDataSource.WEB) return
+
+            pollSysfsClimate(force = true)
+
+            if (sm == null || sensorsRegistered) return
 
             if (sm.isDynamicSensorDiscoverySupported && dynamicSensorCallback == null) {
                 val cb = object : SensorManager.DynamicSensorCallback() {
                     override fun onDynamicSensorConnected(sensor: Sensor) {
-                        if (isAmbientTempSensor(sensor) || isHumiditySensor(sensor)) {
+                        if (DeviceClimateReader.isAmbientTempSensor(sensor) || DeviceClimateReader.isHumiditySensor(sensor)) {
                             stopClimateSensors()
                             startClimateSensors()
                         }
@@ -421,21 +413,62 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
             if (tempSensors.isEmpty() && humSensors.isEmpty()) return
 
             var registered = false
-            for (s in tempSensors) {
-                if (sm.registerListener(climateSensorListener, s, SensorManager.SENSOR_DELAY_UI, 0)) {
-                    registeredTempSensors.add(s)
+            val combinedSensors = (tempSensors + humSensors).distinct()
+            for (s in combinedSensors) {
+                val ok = sm.registerListener(climateSensorListener, s, SensorManager.SENSOR_DELAY_NORMAL) ||
+                    sm.registerListener(climateSensorListener, s, SensorManager.SENSOR_DELAY_UI, 0)
+                if (ok) {
+                    if (s in tempSensors) registeredTempSensors.add(s)
+                    if (s in humSensors) registeredHumSensors.add(s)
                     registered = true
                 }
             }
-            for (s in humSensors) {
-                if (sm.registerListener(climateSensorListener, s, SensorManager.SENSOR_DELAY_UI, 0)) {
-                    registeredHumSensors.add(s)
-                    registered = true
+            if (registered) {
+                try {
+                    sm.flush(climateSensorListener)
+                } catch (_: Throwable) {
                 }
             }
             sensorsRegistered = registered
         } catch (_: Throwable) {
         }
+    }
+
+    private fun pollSysfsClimate(force: Boolean = false) {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (!force && now - lastSysfsPollMs < 6000L) return
+        lastSysfsPollMs = now
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val sysfs = DeviceClimateReader.readSysfsAndProps(app)
+                val sm = sensorManager
+                val diag = DeviceClimateReader.buildSensorDiagnostic(sm, discoveredTempSensors, discoveredHumSensors, sysfs)
+                _uiState.update { cur ->
+                    val dc = cur.deviceClimate
+                    val nextTemp = lastSensorTempC ?: sysfs.tempC ?: dc.tempC
+                    val nextHum = lastSensorHumidity ?: sysfs.humidity ?: dc.humidity
+                    cur.copy(
+                        deviceClimate = dc.copy(
+                            hasTempSensor = dc.hasTempSensor || sysfs.hasTempNode || nextTemp != null,
+                            hasHumiditySensor = dc.hasHumiditySensor || sysfs.hasHumidityNode || nextHum != null,
+                            tempC = nextTemp,
+                            humidity = nextHum,
+                            sensorDiagnostic = diag
+                        )
+                    )
+                }
+            } catch (_: Throwable) {
+            }
+        }
+    }
+
+    fun rescanClimateSensors() {
+        playSelect()
+        lastSensorTempC = null
+        lastSensorHumidity = null
+        stopClimateSensors()
+        startClimateSensors()
+        toast(tr("Đã quét lại cảm biến thiết bị", "Rescanned device sensors"))
     }
 
     private fun stopClimateSensors() {
@@ -471,6 +504,10 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                 updateSysBars()
                 updateNetwork()
                 maybeFetchWeather(force = false)
+                val d = _uiState.value.display
+                if (d.humidityOn && d.climateSource != ClimateDataSource.WEB) {
+                    pollSysfsClimate(force = false)
+                }
                 val today = Calendar.getInstance().get(Calendar.DAY_OF_YEAR)
                 if (today != lastDay) updateHeader() else updateTimeOnly()
                 delay(2000L)

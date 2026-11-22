@@ -463,10 +463,15 @@ fun HomeScreen(
                                     }
 
                                     @Composable
-                                    fun MiniCardsGrid(modifier: Modifier = Modifier) {
+                                    fun MiniCardsGrid(
+                                        maxTotalWidth: androidx.compose.ui.unit.Dp,
+                                        modifier: Modifier = Modifier
+                                    ) {
                                         Column(
-                                            modifier = modifier,
-                                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                                            modifier = modifier
+                                                .widthIn(max = maxTotalWidth)
+                                                .width(IntrinsicSize.Max),
+                                            verticalArrangement = Arrangement.spacedBy(5.dp)
                                         ) {
                                             when {
                                                 weatherCard != null && (bottomCards.size == 1 || bottomCards.size >= 3) -> {
@@ -474,18 +479,19 @@ fun HomeScreen(
                                                         modifier = Modifier
                                                             .fillMaxWidth()
                                                             .height(IntrinsicSize.Min),
-                                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
                                                     ) {
                                                         MiniStatCard(
                                                             spec = weatherCard,
                                                             modifier = Modifier
-                                                                .weight(1.58f)
+                                                                .weight(1f)
+                                                                .widthIn(min = 120.dp, max = 188.dp)
                                                                 .fillMaxHeight()
                                                         )
                                                         MiniStatCard(
                                                             spec = bottomCards[0],
                                                             modifier = Modifier
-                                                                .weight(1f)
+                                                                .wrapContentWidth()
                                                                 .fillMaxHeight()
                                                         )
                                                     }
@@ -494,7 +500,7 @@ fun HomeScreen(
                                                             modifier = Modifier
                                                                 .fillMaxWidth()
                                                                 .height(IntrinsicSize.Min),
-                                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                            horizontalArrangement = Arrangement.spacedBy(5.dp)
                                                         ) {
                                                             bottomCards.drop(1).forEach { card ->
                                                                 MiniStatCard(
@@ -507,19 +513,19 @@ fun HomeScreen(
                                                         }
                                                     }
                                                 }
-                                                else -> {
-                                                    if (weatherCard != null) {
-                                                        MiniStatCard(
-                                                            spec = weatherCard,
-                                                            modifier = Modifier.fillMaxWidth()
-                                                        )
-                                                    }
+                                                weatherCard != null -> {
+                                                    MiniStatCard(
+                                                        spec = weatherCard,
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .widthIn(min = 120.dp, max = maxTotalWidth)
+                                                    )
                                                     if (bottomCards.isNotEmpty()) {
                                                         Row(
                                                             modifier = Modifier
                                                                 .fillMaxWidth()
                                                                 .height(IntrinsicSize.Min),
-                                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                            horizontalArrangement = Arrangement.spacedBy(5.dp)
                                                         ) {
                                                             bottomCards.forEach { card ->
                                                                 MiniStatCard(
@@ -532,39 +538,39 @@ fun HomeScreen(
                                                         }
                                                     }
                                                 }
+                                                bottomCards.isNotEmpty() -> {
+                                                    Row(
+                                                        modifier = Modifier
+                                                            .height(IntrinsicSize.Min),
+                                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                                    ) {
+                                                        bottomCards.forEach { card ->
+                                                            MiniStatCard(
+                                                                spec = card,
+                                                                modifier = Modifier
+                                                                    .wrapContentWidth()
+                                                                    .fillMaxHeight()
+                                                            )
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
                                     }
 
                                     if (showMiniGrid && !isCompactWidth) {
-                                        val gridWidth = when {
-                                            weatherCard != null && bottomCards.size >= 3 -> 256.dp
-                                            weatherCard != null && bottomCards.size == 1 -> 248.dp
-                                            weatherCard != null && bottomCards.isNotEmpty() -> 236.dp
-                                            weatherCard != null -> 216.dp
-                                            bottomCards.size >= 3 -> 248.dp
-                                            bottomCards.size == 2 -> 172.dp
-                                            else -> 98.dp
-                                        }
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                                         ) {
-                                            ClockTextColumn(modifier = Modifier.widthIn(max = 198.dp))
-                                            MiniCardsGrid(modifier = Modifier.width(gridWidth))
+                                            ClockTextColumn(modifier = Modifier.widthIn(max = 200.dp))
+                                            MiniCardsGrid(maxTotalWidth = 266.dp)
                                         }
                                     } else {
                                         ClockTextColumn(modifier = Modifier.widthIn(max = 290.dp))
                                         if (showMiniGrid) {
                                             Spacer(Modifier.height(8.dp))
-                                            val compactGridWidth = when {
-                                                weatherCard != null && (bottomCards.size == 1 || bottomCards.size >= 3) -> 260.dp
-                                                weatherCard != null -> 236.dp
-                                                bottomCards.size >= 3 -> 250.dp
-                                                bottomCards.size == 2 -> 176.dp
-                                                else -> 104.dp
-                                            }
-                                            MiniCardsGrid(modifier = Modifier.width(compactGridWidth))
+                                            MiniCardsGrid(maxTotalWidth = 280.dp)
                                         }
                                     }
                                 }

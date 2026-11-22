@@ -245,6 +245,16 @@ internal fun ClimateSourceMenuDialog(state: LauncherUiState, vm: LauncherViewMod
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Medium
                     )
+                    if (dc.sensorDiagnostic.isNotEmpty()) {
+                        Text(
+                            text = dc.sensorDiagnostic,
+                            color = Color(0xAAFFFFFF),
+                            fontSize = 10.5.sp,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
                 }
             }
         }
@@ -282,8 +292,13 @@ internal fun ClimateSourceMenuDialog(state: LauncherUiState, vm: LauncherViewMod
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 10.dp),
-            horizontalArrangement = Arrangement.End
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
         ) {
+            MacActionButton(
+                text = if (en) "Rescan sensors" else "Quét lại cảm biến",
+                color = Color(0x38FFFFFF),
+                onClick = vm::rescanClimateSensors
+            )
             MacActionButton(
                 text = if (en) "Back" else "Quay lại",
                 color = LauncherColors.accent(state.theme),
