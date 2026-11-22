@@ -63,6 +63,7 @@ import vn.launcher.tv.data.maskGeminiApiKey
 import vn.launcher.tv.data.savePersonalGeminiApiKey
 import vn.launcher.tv.model.ActiveDialog
 import vn.launcher.tv.model.AppItem
+import vn.launcher.tv.model.ClimateDataSource
 import vn.launcher.tv.model.ClockFontStyle
 import vn.launcher.tv.model.DisplayPrefs
 import vn.launcher.tv.model.DockTab
@@ -269,7 +270,8 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                     soundOn = prefs.getBoolean("sound", true),
                     clockFont = ClockFontStyle.fromId(prefs.getString("clockFont", ClockFontStyle.DEFAULT.id)),
                     clockBold = prefs.getBoolean("clockBold", false),
-                    clockDashed = prefs.getBoolean("clockDashed", false)
+                    clockDashed = prefs.getBoolean("clockDashed", false),
+                    climateSource = ClimateDataSource.fromId(prefs.getString("climateSource", ClimateDataSource.AUTO.id))
                 ),
                 tvChannels = listOf(
                     TvChannelSlot(0, chName(0), chLink(0)),
@@ -393,7 +395,8 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                 )
             }
 
-            if (!prefs.getBoolean("humidityOn", true) || sensorsRegistered) return
+            val source = ClimateDataSource.fromId(prefs.getString("climateSource", ClimateDataSource.AUTO.id))
+            if (!prefs.getBoolean("humidityOn", true) || source == ClimateDataSource.WEB || sensorsRegistered) return
 
             if (sm.isDynamicSensorDiscoverySupported && dynamicSensorCallback == null) {
                 val cb = object : SensorManager.DynamicSensorCallback() {
@@ -1341,6 +1344,28 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         prefs.edit().putBoolean("clockDashed", now).apply()
         playSelect()
         _uiState.update { it.copy(display = it.display.copy(clockDashed = now)) }
+    }
+
+    fun setClimateSource(source: ClimateDataSource) {
+        prefs.edit().putString("climateSource", source.id).apply()
+        playSelect()
+        val d = _uiState.value.display
+        _uiState.update { it.copy(display = d.copy(climateSource = source)) }
+        when (source) {
+            ClimateDataSource.WEB -> {
+                stopClimateSensors()
+                showCachedWeather()
+                maybeFetchWeather(force = false)
+            }
+            ClimateDataSource.SENSOR -> {
+                if (d.humidityOn) startClimateSensors()
+            }
+            ClimateDataSource.AUTO -> {
+                if (d.humidityOn) startClimateSensors()
+                showCachedWeather()
+                maybeFetchWeather(force = false)
+            }
+        }
     }
 
     fun setVolume(level: Int) {

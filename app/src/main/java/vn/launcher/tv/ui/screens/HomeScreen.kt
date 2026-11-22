@@ -14,11 +14,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -32,13 +34,17 @@ import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.DeviceThermostat
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SettingsEthernet
 import androidx.compose.material.icons.filled.Usb
+import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -78,6 +84,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import vn.launcher.tv.data.WeatherService
 import vn.launcher.tv.model.AppItem
+import vn.launcher.tv.model.ClimateDataSource
 import vn.launcher.tv.model.DockTab
 import vn.launcher.tv.model.LauncherUiState
 import vn.launcher.tv.ui.components.GlassPill
@@ -241,75 +248,105 @@ fun HomeScreen(
                                 val showWeatherCard = state.weather.enabled
                                 val showHumidityCard = state.display.humidityOn
                                 val showSysCards = state.sysBars.enabled
-                                val miniCards = buildList {
-                                    if (showWeatherCard) {
-                                        val w = state.weather
-                                        val desc = if (w.hasData) WeatherService.describe(w.code, en) else null
-                                        val locLocale = Locale.forLanguageTag(state.lang)
-                                        val fallbackLoc = when {
-                                            state.wxWardLabel.isNotBlank() &&
-                                                state.wxWardLabel != "—" &&
-                                                !state.wxWardLabel.equals("Whole province/city", ignoreCase = true) &&
-                                                !state.wxWardLabel.equals("Cả tỉnh/thành phố", ignoreCase = true) -> {
-                                                "${state.wxWardLabel}, ${state.wxProvinceLabel}"
-                                            }
-                                            state.wxProvinceLabel.isNotBlank() &&
-                                                !state.wxProvinceLabel.equals("Automatic", ignoreCase = true) &&
-                                                !state.wxProvinceLabel.equals("Tự động", ignoreCase = true) -> state.wxProvinceLabel
-                                            else -> ""
+                                val weatherCard: MiniCardSpec? = if (showWeatherCard) {
+                                    val w = state.weather
+                                    val desc = if (w.hasData) WeatherService.describe(w.code, en) else null
+                                    val locLocale = Locale.forLanguageTag(state.lang)
+                                    val fallbackLoc = when {
+                                        state.wxWardLabel.isNotBlank() &&
+                                            state.wxWardLabel != "—" &&
+                                            !state.wxWardLabel.equals("Whole province/city", ignoreCase = true) &&
+                                            !state.wxWardLabel.equals("Cả tỉnh/thành phố", ignoreCase = true) -> {
+                                            "${state.wxWardLabel}, ${state.wxProvinceLabel}"
                                         }
-                                        val rawLocationTitle = w.city.trim().ifEmpty { fallbackLoc }
-                                        val locationTitle = rawLocationTitle
-                                            .ifEmpty { if (en) "WEATHER" else "THỜI TIẾT" }
-                                            .uppercase(locLocale)
-                                        add(
-                                            MiniCardSpec(
-                                                dotColor = Color(0xFFFF9F0A),
-                                                label = locationTitle,
-                                                badge = if (w.hasData) "${w.rain}%☂" else "",
-                                                mainValue = if (w.hasData) "${Math.round(w.temp)}°" else "…",
-                                                subValue = if (w.hasData) "${desc!!.first} ${Math.round(w.min)}/${Math.round(w.max)}°" else if (en) "Loading" else "Đang tải",
-                                                progress = if (w.hasData) ((w.temp.toFloat() / 42f).coerceIn(0.12f, 1f)) else 0.15f
-                                            )
-                                        )
+                                        state.wxProvinceLabel.isNotBlank() &&
+                                            !state.wxProvinceLabel.equals("Automatic", ignoreCase = true) &&
+                                            !state.wxProvinceLabel.equals("Tự động", ignoreCase = true) -> state.wxProvinceLabel
+                                        else -> ""
                                     }
+                                    val rawLocationTitle = w.city.trim().ifEmpty { fallbackLoc }
+                                    val locationTitle = rawLocationTitle
+                                        .ifEmpty { if (en) "WEATHER" else "THỜI TIẾT" }
+                                        .uppercase(locLocale)
+                                    MiniCardSpec(
+                                        dotColor = Color(0xFFFF9F0A),
+                                        label = locationTitle,
+                                        badge = if (w.hasData) "${w.rain}%☂" else "",
+                                        mainValue = if (w.hasData) "${Math.round(w.temp)}°" else "…",
+                                        subValue = if (w.hasData) "${desc!!.first} ${Math.round(w.min)}/${Math.round(w.max)}°" else if (en) "Loading" else "Đang tải",
+                                        progress = if (w.hasData) ((w.temp.toFloat() / 42f).coerceIn(0.12f, 1f)) else 0.15f,
+                                        expanded = true,
+                                        mainIcon = Icons.Filled.DeviceThermostat,
+                                        mainIconTint = Color(0xFFFF9F0A)
+                                    )
+                                } else null
+
+                                val bottomCards = buildList {
                                     if (showHumidityCard) {
                                         val w = state.weather
                                         val dc = state.deviceClimate
-                                        val exactTemp = dc.tempC
-                                        val exactHum = dc.humidity
-                                        val displayHum = exactHum ?: if (w.hasData) w.humidity else null
-                                        val displayTemp = exactTemp ?: if (w.hasData) w.temp else null
-                                        val hasSensor = dc.hasAnySensor || exactTemp != null || exactHum != null
-                                        val onlyTempSensor = exactTemp != null && displayHum == null
+                                        val src = state.display.climateSource
+                                        val hasSensorReading = dc.hasAnySensor || dc.tempC != null || dc.humidity != null
+                                        val useSensorTemp = src != ClimateDataSource.WEB && dc.tempC != null
+                                        val useSensorHum = src != ClimateDataSource.WEB && dc.humidity != null
+
+                                        val displayTemp: Double? = when (src) {
+                                            ClimateDataSource.SENSOR -> dc.tempC
+                                            ClimateDataSource.WEB -> if (w.hasData) w.temp else null
+                                            ClimateDataSource.AUTO -> dc.tempC ?: if (w.hasData) w.temp else null
+                                        }
+                                        val displayHum: Int? = when (src) {
+                                            ClimateDataSource.SENSOR -> dc.humidity
+                                            ClimateDataSource.WEB -> if (w.hasData) w.humidity else null
+                                            ClimateDataSource.AUTO -> dc.humidity ?: if (w.hasData) w.humidity else null
+                                        }
+                                        val showingSensor = when (src) {
+                                            ClimateDataSource.SENSOR -> true
+                                            ClimateDataSource.WEB -> false
+                                            ClimateDataSource.AUTO -> useSensorTemp || useSensorHum || hasSensorReading
+                                        }
+                                        val tempText = when {
+                                            displayTemp != null && useSensorTemp -> String.format(Locale.US, "%.1f°", displayTemp)
+                                            displayTemp != null -> "${Math.round(displayTemp)}°"
+                                            src == ClimateDataSource.SENSOR -> "—"
+                                            else -> "…"
+                                        }
+                                        val humText = when {
+                                            displayHum != null -> "$displayHum%"
+                                            src == ClimateDataSource.SENSOR && displayTemp == null && !hasSensorReading -> {
+                                                if (en) "No sensor" else "Chưa có CB"
+                                            }
+                                            src == ClimateDataSource.SENSOR -> "—"
+                                            else -> "…"
+                                        }
+                                        val noSensorInSensorMode = src == ClimateDataSource.SENSOR && displayTemp == null && displayHum == null && !hasSensorReading
                                         add(
                                             MiniCardSpec(
-                                                dotColor = if (hasSensor) Color(0xFF30D158) else Color(0xFF38BDF8),
-                                                label = if (en) "TEMP · HUM" else "NHIỆT · ẨM",
+                                                dotColor = if (showingSensor) Color(0xFF30D158) else Color(0xFF38BDF8),
+                                                label = if (en) "TEMP·HUM" else "NHIỆT·ẨM",
                                                 badge = "",
-                                                mainValue = when {
-                                                    displayHum != null -> "$displayHum%"
-                                                    onlyTempSensor -> String.format(Locale.US, "%.1f°C", exactTemp)
-                                                    hasSensor -> "—"
-                                                    else -> "…"
-                                                },
-                                                subValue = when {
-                                                    onlyTempSensor -> if (en) "Sensor" else "Cảm biến"
-                                                    displayTemp != null -> String.format(Locale.US, "%.1f°C", displayTemp)
-                                                    hasSensor -> if (en) "Sensor" else "Cảm biến"
-                                                    en -> "Loading"
-                                                    else -> "Đang tải"
-                                                },
+                                                mainValue = tempText,
+                                                subValue = humText,
                                                 progress = when {
                                                     displayHum != null -> (displayHum / 100f).coerceIn(0.08f, 1f)
-                                                    exactTemp != null -> (exactTemp.toFloat() / 45f).coerceIn(0.12f, 1f)
+                                                    displayTemp != null -> (displayTemp.toFloat() / 45f).coerceIn(0.12f, 1f)
                                                     else -> 0.12f
                                                 },
-                                                sensorContentDescription = if (hasSensor) {
+                                                sourceIcon = if (showingSensor) Icons.Filled.Sensors else Icons.Filled.Cloud,
+                                                sourceIconTint = when {
+                                                    noSensorInSensorMode -> Color(0xFFFF9F0A)
+                                                    showingSensor -> Color(0xFF30D158)
+                                                    else -> Color(0xFF38BDF8)
+                                                },
+                                                sourceContentDescription = if (showingSensor) {
                                                     if (en) "Device sensor" else "Cảm biến thiết bị"
                                                 } else {
-                                                    null
-                                                }
+                                                    if (en) "Web weather data" else "Dữ liệu web"
+                                                },
+                                                mainIcon = Icons.Filled.DeviceThermostat,
+                                                mainIconTint = Color(0xFFFF9F0A),
+                                                subIcon = if (noSensorInSensorMode) null else Icons.Filled.WaterDrop,
+                                                subIconTint = Color(0xFF38BDF8)
                                             )
                                         )
                                     }
@@ -337,11 +374,11 @@ fun HomeScreen(
                                         )
                                     }
                                 }
-                                val showMiniGrid = miniCards.isNotEmpty()
+                                val showMiniGrid = weatherCard != null || bottomCards.isNotEmpty()
                                 Column(
                                     modifier = Modifier
                                         .wrapContentWidth(Alignment.Start)
-                                        .widthIn(max = if (showMiniGrid && !isCompactWidth) 460.dp else 320.dp)
+                                        .widthIn(max = if (showMiniGrid && !isCompactWidth) 488.dp else 330.dp)
                                         .clip(RoundedCornerShape(20.dp))
                                         .background(barSurfaceBrush(state.theme), RoundedCornerShape(20.dp))
                                         .border(1.dp, Color(0x3DFFFFFF), RoundedCornerShape(20.dp))
@@ -431,26 +468,67 @@ fun HomeScreen(
                                             modifier = modifier,
                                             verticalArrangement = Arrangement.spacedBy(4.dp)
                                         ) {
-                                            if (miniCards.size == 3) {
-                                                MiniStatCard(
-                                                    spec = miniCards[0],
-                                                    modifier = Modifier.fillMaxWidth()
-                                                )
-                                                Row(
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                                ) {
-                                                    MiniStatCard(spec = miniCards[1], modifier = Modifier.weight(1f))
-                                                    MiniStatCard(spec = miniCards[2], modifier = Modifier.weight(1f))
-                                                }
-                                            } else {
-                                                miniCards.chunked(2).forEach { pair ->
+                                            when {
+                                                weatherCard != null && (bottomCards.size == 1 || bottomCards.size >= 3) -> {
                                                     Row(
-                                                        modifier = Modifier.fillMaxWidth(),
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .height(IntrinsicSize.Min),
                                                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                                                     ) {
-                                                        pair.forEach { card ->
-                                                            MiniStatCard(spec = card, modifier = Modifier.weight(1f))
+                                                        MiniStatCard(
+                                                            spec = weatherCard,
+                                                            modifier = Modifier
+                                                                .weight(1.58f)
+                                                                .fillMaxHeight()
+                                                        )
+                                                        MiniStatCard(
+                                                            spec = bottomCards[0],
+                                                            modifier = Modifier
+                                                                .weight(1f)
+                                                                .fillMaxHeight()
+                                                        )
+                                                    }
+                                                    if (bottomCards.size > 1) {
+                                                        Row(
+                                                            modifier = Modifier
+                                                                .fillMaxWidth()
+                                                                .height(IntrinsicSize.Min),
+                                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                        ) {
+                                                            bottomCards.drop(1).forEach { card ->
+                                                                MiniStatCard(
+                                                                    spec = card,
+                                                                    modifier = Modifier
+                                                                        .weight(1f)
+                                                                        .fillMaxHeight()
+                                                                )
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                else -> {
+                                                    if (weatherCard != null) {
+                                                        MiniStatCard(
+                                                            spec = weatherCard,
+                                                            modifier = Modifier.fillMaxWidth()
+                                                        )
+                                                    }
+                                                    if (bottomCards.isNotEmpty()) {
+                                                        Row(
+                                                            modifier = Modifier
+                                                                .fillMaxWidth()
+                                                                .height(IntrinsicSize.Min),
+                                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                        ) {
+                                                            bottomCards.forEach { card ->
+                                                                MiniStatCard(
+                                                                    spec = card,
+                                                                    modifier = Modifier
+                                                                        .weight(1f)
+                                                                        .fillMaxHeight()
+                                                                )
+                                                            }
                                                         }
                                                     }
                                                 }
@@ -459,19 +537,34 @@ fun HomeScreen(
                                     }
 
                                     if (showMiniGrid && !isCompactWidth) {
-                                        val gridWidth = if (miniCards.size == 1) 114.dp else 184.dp
+                                        val gridWidth = when {
+                                            weatherCard != null && bottomCards.size >= 3 -> 256.dp
+                                            weatherCard != null && bottomCards.size == 1 -> 248.dp
+                                            weatherCard != null && bottomCards.isNotEmpty() -> 236.dp
+                                            weatherCard != null -> 216.dp
+                                            bottomCards.size >= 3 -> 248.dp
+                                            bottomCards.size == 2 -> 172.dp
+                                            else -> 98.dp
+                                        }
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                                         ) {
-                                            ClockTextColumn(modifier = Modifier.widthIn(max = 236.dp))
+                                            ClockTextColumn(modifier = Modifier.widthIn(max = 198.dp))
                                             MiniCardsGrid(modifier = Modifier.width(gridWidth))
                                         }
                                     } else {
                                         ClockTextColumn(modifier = Modifier.widthIn(max = 290.dp))
                                         if (showMiniGrid) {
                                             Spacer(Modifier.height(8.dp))
-                                            MiniCardsGrid(modifier = Modifier.width(if (miniCards.size == 1) 124.dp else 196.dp))
+                                            val compactGridWidth = when {
+                                                weatherCard != null && (bottomCards.size == 1 || bottomCards.size >= 3) -> 260.dp
+                                                weatherCard != null -> 236.dp
+                                                bottomCards.size >= 3 -> 250.dp
+                                                bottomCards.size == 2 -> 176.dp
+                                                else -> 104.dp
+                                            }
+                                            MiniCardsGrid(modifier = Modifier.width(compactGridWidth))
                                         }
                                     }
                                 }

@@ -25,10 +25,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -233,7 +232,14 @@ internal data class MiniCardSpec(
     val mainValue: String,
     val subValue: String,
     val progress: Float,
-    val sensorContentDescription: String? = null
+    val expanded: Boolean = false,
+    val sourceIcon: ImageVector? = null,
+    val sourceIconTint: Color = Color(0xFF30D158),
+    val sourceContentDescription: String? = null,
+    val mainIcon: ImageVector? = null,
+    val mainIconTint: Color = Color(0xFFFF9F0A),
+    val subIcon: ImageVector? = null,
+    val subIconTint: Color = Color(0xFF38BDF8)
 )
 
 @Composable
@@ -241,12 +247,16 @@ internal fun MiniStatCard(
     spec: MiniCardSpec,
     modifier: Modifier = Modifier
 ) {
+    val corner = if (spec.expanded) 11.dp else 9.dp
+    val hPad = if (spec.expanded) 7.dp else 5.dp
+    val vPad = if (spec.expanded) 4.5.dp else 3.5.dp
+
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(Color(0x1EFFFFFF), RoundedCornerShape(10.dp))
-            .border(1.dp, Color(0x42FFFFFF), RoundedCornerShape(10.dp))
-            .padding(horizontal = 6.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(corner))
+            .background(Color(0x1EFFFFFF), RoundedCornerShape(corner))
+            .border(1.dp, Color(0x42FFFFFF), RoundedCornerShape(corner))
+            .padding(horizontal = hPad, vertical = vPad)
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -254,76 +264,106 @@ internal fun MiniStatCard(
         ) {
             Box(
                 modifier = Modifier
-                    .size(6.dp)
+                    .size(if (spec.expanded) 5.5.dp else 5.dp)
                     .clip(RoundedCornerShape(2.dp))
                     .background(spec.dotColor)
             )
-            Spacer(Modifier.width(4.dp))
+            Spacer(Modifier.width(if (spec.expanded) 3.5.dp else 3.dp))
             Text(
                 text = spec.label,
-                color = Color(0xCCFFFFFF),
-                fontSize = 7.5.sp,
+                color = Color(0xD9FFFFFF),
+                fontSize = if (spec.expanded) 7.8.sp else 6.8.sp,
+                lineHeight = if (spec.expanded) 9.5.sp else 8.sp,
                 fontWeight = FontWeight.Bold,
-                letterSpacing = 0.2.sp,
-                maxLines = 1,
+                letterSpacing = if (spec.expanded) 0.2.sp else 0.1.sp,
+                maxLines = if (spec.expanded) 2 else 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f)
             )
-            if (spec.sensorContentDescription != null) {
+            if (spec.sourceIcon != null) {
                 Spacer(Modifier.width(2.dp))
                 Icon(
-                    imageVector = Icons.Filled.Sensors,
-                    contentDescription = spec.sensorContentDescription,
-                    tint = Color(0xFF30D158),
-                    modifier = Modifier.size(10.dp)
+                    imageVector = spec.sourceIcon,
+                    contentDescription = spec.sourceContentDescription,
+                    tint = spec.sourceIconTint,
+                    modifier = Modifier.size(9.5.dp)
                 )
             }
             if (spec.badge.isNotEmpty()) {
-                Spacer(Modifier.width(2.dp))
+                Spacer(Modifier.width(3.dp))
                 Text(
                     text = spec.badge,
-                    color = Color(0xB8FFFFFF),
-                    fontSize = 7.sp,
+                    color = Color(0xCCFFFFFF),
+                    fontSize = if (spec.expanded) 7.2.sp else 6.8.sp,
                     maxLines = 1
                 )
             }
         }
-        Spacer(Modifier.height(1.dp))
+        Spacer(Modifier.height(if (spec.expanded) 2.dp else 1.5.dp))
         Row(
-            verticalAlignment = Alignment.Bottom,
-            horizontalArrangement = Arrangement.spacedBy(3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(if (spec.expanded) 3.dp else 2.5.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
+            if (spec.mainIcon != null) {
+                Icon(
+                    imageVector = spec.mainIcon,
+                    contentDescription = null,
+                    tint = spec.mainIconTint,
+                    modifier = Modifier.size(if (spec.expanded) 12.dp else 9.5.dp)
+                )
+            }
             Text(
                 text = spec.mainValue,
                 color = Color.White,
-                fontSize = 12.5.sp,
+                fontSize = when {
+                    spec.expanded -> 13.sp
+                    spec.subIcon != null -> 9.8.sp
+                    else -> 10.8.sp
+                },
                 fontWeight = FontWeight.Bold,
-                maxLines = 1
+                maxLines = 1,
+                softWrap = false
             )
             if (spec.subValue.isNotEmpty()) {
+                if (spec.subIcon != null) {
+                    Spacer(Modifier.width(1.dp))
+                    Icon(
+                        imageVector = spec.subIcon,
+                        contentDescription = null,
+                        tint = spec.subIconTint,
+                        modifier = Modifier.size(if (spec.expanded) 10.5.dp else 9.5.dp)
+                    )
+                }
                 Text(
                     text = spec.subValue,
-                    color = Color(0xD9FFFFFF),
-                    fontSize = 8.sp,
+                    color = if (spec.subIcon != null) Color.White else Color(0xD9FFFFFF),
+                    fontSize = when {
+                        spec.expanded -> 8.2.sp
+                        spec.subIcon != null -> 9.8.sp
+                        else -> 7.sp
+                    },
+                    fontWeight = if (spec.subIcon != null) FontWeight.Bold else FontWeight.Normal,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(bottom = 0.5.dp)
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }
-        Spacer(Modifier.height(2.5.dp))
+        Spacer(Modifier.weight(1f, fill = true))
+        Spacer(Modifier.height(if (spec.expanded) 3.dp else 2.dp))
+        val barH = if (spec.expanded) 3.dp else 2.dp
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(2.5.dp)
+                .height(barH)
                 .clip(RoundedCornerShape(1.5.dp))
                 .background(Color(0x30FFFFFF))
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth(spec.progress.coerceIn(0f, 1f))
-                    .height(2.5.dp)
+                    .height(barH)
                     .clip(RoundedCornerShape(1.5.dp))
                     .background(spec.dotColor)
             )

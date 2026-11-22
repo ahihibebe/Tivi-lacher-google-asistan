@@ -29,6 +29,16 @@ enum class ClockFontStyle(val id: String) {
     }
 }
 
+enum class ClimateDataSource(val id: String) {
+    AUTO("auto"),
+    SENSOR("sensor"),
+    WEB("web");
+
+    companion object {
+        fun fromId(id: String?): ClimateDataSource = entries.firstOrNull { it.id == id } ?: AUTO
+    }
+}
+
 enum class DockTab(val index: Int) {
     APPS(0),
     RECENTS(1),
@@ -141,7 +151,8 @@ data class DisplayPrefs(
     val soundOn: Boolean = true,
     val clockFont: ClockFontStyle = ClockFontStyle.DEFAULT,
     val clockBold: Boolean = false,
-    val clockDashed: Boolean = false
+    val clockDashed: Boolean = false,
+    val climateSource: ClimateDataSource = ClimateDataSource.AUTO
 )
 
 data class PriceSection(
@@ -229,6 +240,7 @@ sealed interface ActiveDialog {
     data class PersonalAiKeyConfig(val returnQuery: String?) : ActiveDialog
     data class QrApiKeyUpload(val url: String, val qrBitmap: Bitmap?, val returnQuery: String?) : ActiveDialog
     data object DisplayMenu : ActiveDialog
+    data object ClimateSourceMenu : ActiveDialog
     data object ClockStyleMenu : ActiveDialog
     data object ChooseProvince : ActiveDialog
     data class ChooseWard(

@@ -145,6 +145,7 @@ fun ActiveDialogHost(
         )
         ActiveDialog.AboutInfo -> AboutInfoDialog(state, vm)
         ActiveDialog.DisplayMenu -> DisplayMenuDialog(state, vm)
+        ActiveDialog.ClimateSourceMenu -> ClimateSourceMenuDialog(state, vm)
         ActiveDialog.ClockStyleMenu -> ClockStyleMenuDialog(state, vm)
         ActiveDialog.ChooseProvince -> ChooseProvinceDialog(state, vm)
         is ActiveDialog.ChooseWard -> ChooseWardDialog(dialog, state.theme, en, vm)
@@ -763,22 +764,22 @@ private fun AboutInfoDialog(state: LauncherUiState, vm: LauncherViewModel) {
     MacWindowDialog(
         title = stringResource(R.string.info_title),
         theme = state.theme,
-        maxWidth = 480.dp,
+        maxWidth = 500.dp,
         onDismiss = vm::closeDialog
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(8.dp),
+                .padding(horizontal = 6.dp, vertical = 2.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Box(
                 modifier = Modifier
-                    .size(164.dp)
-                    .clip(RoundedCornerShape(18.dp))
+                    .size(112.dp)
+                    .clip(RoundedCornerShape(14.dp))
                     .background(Color.White)
-                    .border(1.5.dp, Color(0x55FFFFFF), RoundedCornerShape(18.dp))
-                    .padding(6.dp),
+                    .border(1.5.dp, Color(0x55FFFFFF), RoundedCornerShape(14.dp))
+                    .padding(5.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Image(
@@ -788,29 +789,29 @@ private fun AboutInfoDialog(state: LauncherUiState, vm: LauncherViewModel) {
                     modifier = Modifier.fillMaxSize()
                 )
             }
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(6.dp))
             Text(
                 text = "MB: 220011026789",
                 color = Color.White,
-                fontSize = 19.sp,
+                fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
-                letterSpacing = 0.5.sp
+                letterSpacing = 0.4.sp
             )
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(3.dp))
             Text(
                 text = stringResource(R.string.info_description),
                 color = Color(0xE6FFFFFF),
-                fontSize = 14.sp,
+                fontSize = 13.sp,
                 fontWeight = FontWeight.Medium,
                 textAlign = TextAlign.Center
             )
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(2.dp))
             Text(
                 text = "${stringResource(R.string.app_name)} · ${state.appVersion}",
                 color = Color(0x99FFFFFF),
-                fontSize = 12.sp
+                fontSize = 11.sp
             )
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(8.dp))
             MacRow(
                 title = "Facebook",
                 theme = state.theme,
@@ -831,8 +832,8 @@ private fun AboutInfoDialog(state: LauncherUiState, vm: LauncherViewModel) {
                     }
                 }
             )
-            Text(url, color = Color(0x99FFFFFF), fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
-            Spacer(Modifier.height(12.dp))
+            Text(url, color = Color(0x99FFFFFF), fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
+            Spacer(Modifier.height(8.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 MacActionButton(
                     text = if (en) "Close" else "Đóng",

@@ -14,21 +14,28 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessTime
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.DeviceThermostat
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Sensors
+import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import vn.launcher.tv.data.AdminData
 import vn.launcher.tv.model.ActiveDialog
+import vn.launcher.tv.model.ClimateDataSource
 import vn.launcher.tv.model.ClockFontStyle
 import vn.launcher.tv.model.LauncherTheme
 import vn.launcher.tv.model.LauncherUiState
@@ -72,6 +79,21 @@ internal fun DisplayMenuDialog(state: LauncherUiState, vm: LauncherViewModel) {
         ) {
             vm.toggleDisplayPref("humidityOn")
         }
+        MacRow(
+            title = if (en) "Temp & humidity source" else "Nguồn nhiệt độ & độ ẩm",
+            theme = state.theme,
+            icon = when (d.climateSource) {
+                ClimateDataSource.SENSOR -> Icons.Filled.Sensors
+                ClimateDataSource.WEB -> Icons.Filled.Cloud
+                ClimateDataSource.AUTO -> Icons.Filled.DeviceThermostat
+            },
+            iconTintBg = palette[4],
+            trailing = climateSourceShortLabel(d.climateSource, en),
+            showChevron = true,
+            testTag = "display_climate_source_row",
+            onFocused = vm::playMove,
+            onClick = { vm.openDialog(ActiveDialog.ClimateSourceMenu) }
+        )
         MacRow(
             title = if (en) "Province / City" else "Tỉnh / Thành phố",
             theme = state.theme,
@@ -159,6 +181,116 @@ internal fun clockFontShortLabel(style: ClockFontStyle, en: Boolean): String = w
     ClockFontStyle.ORBITRON -> "Orbitron"
     ClockFontStyle.JETBRAINS_MONO -> "Mono"
     ClockFontStyle.PLAYFAIR -> "Playfair"
+}
+
+internal fun climateSourceShortLabel(source: ClimateDataSource, en: Boolean): String = when (source) {
+    ClimateDataSource.AUTO -> if (en) "Auto" else "Tự động"
+    ClimateDataSource.SENSOR -> if (en) "Sensor" else "Cảm biến"
+    ClimateDataSource.WEB -> if (en) "Web" else "Dữ liệu web"
+}
+
+@Composable
+internal fun ClimateSourceMenuDialog(state: LauncherUiState, vm: LauncherViewModel) {
+    val en = state.isEnglish
+    val current = state.display.climateSource
+    val dc = state.deviceClimate
+    val palette = LauncherColors.SettingsPalette
+
+    MacWindowDialog(
+        title = if (en) "Temp & humidity source" else "Nguồn nhiệt độ & độ ẩm",
+        theme = state.theme,
+        maxWidth = 500.dp,
+        onDismiss = { vm.openDialog(ActiveDialog.DisplayMenu) }
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 8.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color(0x1EFFFFFF))
+                .border(1.dp, Color(0x38FFFFFF), RoundedCornerShape(14.dp))
+                .padding(horizontal = 12.dp, vertical = 10.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(
+                    imageVector = Icons.Filled.DeviceThermostat,
+                    contentDescription = null,
+                    tint = Color(0xFFFF9F0A),
+                    modifier = Modifier.size(18.dp)
+                )
+                Icon(
+                    imageVector = Icons.Filled.WaterDrop,
+                    contentDescription = null,
+                    tint = Color(0xFF38BDF8),
+                    modifier = Modifier.size(16.dp)
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    val sensorDetectedText = when {
+                        dc.hasTempSensor && dc.hasHumiditySensor -> {
+                            if (en) "Temperature & humidity sensors detected" else "Đã phát hiện cảm biến nhiệt độ & độ ẩm"
+                        }
+                        dc.hasTempSensor -> {
+                            if (en) "Temperature sensor detected (no humidity sensor)" else "Có cảm biến nhiệt độ (chưa có cảm biến độ ẩm)"
+                        }
+                        dc.hasHumiditySensor -> {
+                            if (en) "Humidity sensor detected (no temperature sensor)" else "Có cảm biến độ ẩm (chưa có cảm biến nhiệt độ)"
+                        }
+                        else -> {
+                            if (en) "No ambient temp/humidity sensor found on device" else "Thiết bị chưa có cảm biến nhiệt độ/độ ẩm"
+                        }
+                    }
+                    Text(
+                        text = sensorDetectedText,
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+        }
+
+        val options = listOf(
+            Triple(
+                ClimateDataSource.AUTO,
+                if (en) "Auto (prioritize device sensor)" else "Tự động (ưu tiên cảm biến)",
+                Icons.Filled.DeviceThermostat
+            ),
+            Triple(
+                ClimateDataSource.SENSOR,
+                if (en) "Device sensor only" else "Chỉ dùng cảm biến thiết bị",
+                Icons.Filled.Sensors
+            ),
+            Triple(
+                ClimateDataSource.WEB,
+                if (en) "Web data (Open-Meteo)" else "Dữ liệu web (Open-Meteo)",
+                Icons.Filled.Cloud
+            )
+        )
+        options.forEachIndexed { idx, (src, label, icon) ->
+            MacRow(
+                title = label,
+                theme = state.theme,
+                icon = icon,
+                iconTintBg = palette[(idx + 3) % palette.size],
+                trailing = if (current == src) "✓" else null,
+                testTag = "climate_source_${src.id}",
+                onFocused = vm::playMove,
+                onClick = { vm.setClimateSource(src) }
+            )
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 10.dp),
+            horizontalArrangement = Arrangement.End
+        ) {
+            MacActionButton(
+                text = if (en) "Back" else "Quay lại",
+                color = LauncherColors.accent(state.theme),
+                onClick = { vm.openDialog(ActiveDialog.DisplayMenu) }
+            )
+        }
+    }
 }
 
 @Composable

@@ -23,4 +23,4 @@ VietLauncher là launcher cho Android TV lấy cảm hứng từ Apple TV & macO
 ## Cài đặt & Build
 - Yêu cầu Android SDK 36 (`minSdk = 24`, `targetSdk = 36`) và Java 17+.
 - Build debug APK: `gradle assembleDebug`
-- Đặt làm launcher mặc định qua hệ thống hoặc ADB Wi-Fi (`adb shell cmd package set-home-activity com.aistudio.vietlauncher.kxmpzq/vn.launcher.tv.MainActivity`).
+- Đặt làm launcher mặc định qua hệ thống hoặc ADB Wi-Fi (`adb shell cmd package set-home-activity com.vietlaucher.tt/vn.launcher.tv.MainActivity`).
