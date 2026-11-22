@@ -1,8 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="info_title">Thông tin</string>
-    <string name="info_description">Màn hình chính Android TV phong cách Apple TV và macOS, giao diện tiếng Việt và tiếng Anh.</string>
-    <string name="info_url">http://facebook.com/TruongAlone</string>
-    <string name="info_open">Mở Facebook</string>
-    <string name="info_close">Đóng</string>
+    <string name="info_description">Donate gói bim bim cho em bé.😂</string>
+    <string name="info_url">https://facebook.com/TruongAlone</string>
 </resources>

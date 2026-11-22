@@ -1,15 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Màn hình chính</string>
-    <string name="inputs">Nguồn vào</string>
-    <string name="wifi">Wi-Fi</string>
-    <string name="settings">Cài đặt</string>
-    <string name="all_apps">Tất cả ứng dụng</string>
-    <string name="good_morning">Chào buổi sáng</string>
-    <string name="good_afternoon">Chào buổi chiều</string>
-    <string name="good_evening">Chào buổi tối</string>
-    <string name="voice_search">Giọng nói</string>
-    <string name="tv_label">Xem TV</string>
-    <string name="media_label">Nhạc &amp; ảnh</string>
-    <string name="usb_label">USB</string>
 </resources>

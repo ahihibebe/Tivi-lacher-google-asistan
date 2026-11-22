@@ -3,6 +3,6 @@
     <item
         android:width="66dp"
         android:height="66dp"
-        android:drawable="@drawable/img_vietlauncher_icon_1794536180658"
+        android:drawable="@drawable/ic_vietlauncher_logo"
         android:gravity="center" />
 </layer-list>

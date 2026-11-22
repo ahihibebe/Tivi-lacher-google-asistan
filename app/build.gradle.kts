@@ -13,11 +13,11 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.aistudio.vietlauncher.kxmpzq"
+        applicationId = "com.vietlaucher.tt"
         minSdk = 24
         targetSdk = 36
-        versionCode = 301
-        versionName = "3.0.0"
+        versionCode = 302
+        versionName = "3.0.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -66,7 +66,7 @@ dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
-    implementation(libs.androidx.compose.ui.tooling.preview)
+    // implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.kotlinx.coroutines.android)

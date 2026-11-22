@@ -1,10 +1,8 @@
 package vn.launcher.tv.viewmodel
 
 import android.Manifest
-import android.app.ActivityManager
 import android.app.Application
 import android.app.role.RoleManager
-import android.bluetooth.BluetoothManager
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ComponentName
@@ -14,13 +12,10 @@ import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
-import android.hardware.usb.UsbConstants
-import android.hardware.usb.UsbManager
 import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.MediaMetadata
@@ -28,22 +23,13 @@ import android.media.MediaPlayer
 import android.media.SoundPool
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import android.net.Uri
-import android.net.wifi.WifiManager
 import android.os.Build
-import android.os.Environment
-import android.os.StatFs
-import android.os.storage.StorageManager
 import android.provider.Settings
 import android.speech.tts.TextToSpeech
 import android.view.KeyEvent
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.google.zxing.BarcodeFormat
-import com.google.zxing.EncodeHintType
-import com.google.zxing.qrcode.QRCodeWriter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -63,32 +49,30 @@ import vn.launcher.tv.data.AdminData
 import vn.launcher.tv.data.CrashGuard
 import vn.launcher.tv.data.GeminiAiService
 import vn.launcher.tv.data.Holidays
-import vn.launcher.tv.data.getPersonalGeminiApiKey
-import vn.launcher.tv.data.maskGeminiApiKey
-import vn.launcher.tv.data.savePersonalGeminiApiKey
 import vn.launcher.tv.data.LunarCalendar
 import vn.launcher.tv.data.MediaLibrary
 import vn.launcher.tv.data.PriceRepository
+import vn.launcher.tv.data.QrUploadHelper
+import vn.launcher.tv.data.SystemTelemetry
 import vn.launcher.tv.data.UploadServer
+import vn.launcher.tv.data.VoiceChannelDirectory
 import vn.launcher.tv.data.VoiceCommand
 import vn.launcher.tv.data.WeatherService
+import vn.launcher.tv.data.getPersonalGeminiApiKey
+import vn.launcher.tv.data.maskGeminiApiKey
+import vn.launcher.tv.data.savePersonalGeminiApiKey
 import vn.launcher.tv.model.ActiveDialog
 import vn.launcher.tv.model.AppItem
 import vn.launcher.tv.model.ClockFontStyle
-import vn.launcher.tv.model.DeviceClimateState
 import vn.launcher.tv.model.DisplayPrefs
 import vn.launcher.tv.model.DockTab
 import vn.launcher.tv.model.HeaderState
 import vn.launcher.tv.model.LauncherTheme
 import vn.launcher.tv.model.LauncherUiState
-import vn.launcher.tv.model.MusicPlayerState
-import vn.launcher.tv.model.NetworkPillState
 import vn.launcher.tv.model.NowPlayingPillState
 import vn.launcher.tv.model.PriceKind
 import vn.launcher.tv.model.PriceMatchRow
 import vn.launcher.tv.model.PriceSection
-import vn.launcher.tv.model.SlideshowState
-import vn.launcher.tv.model.SystemBarsState
 import vn.launcher.tv.model.TvChannelSlot
 import vn.launcher.tv.model.WeatherState
 import vn.launcher.tv.service.MediaListener
@@ -97,8 +81,6 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.InputStream
-import java.net.Inet4Address
-import java.net.NetworkInterface
 import java.security.SecureRandom
 import java.util.Calendar
 import java.util.Locale
@@ -170,6 +152,9 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
 
     private var sensorManager: SensorManager? = null
     private var sensorsRegistered: Boolean = false
+    private val registeredTempSensors = HashSet<Sensor>()
+    private val registeredHumSensors = HashSet<Sensor>()
+    private var dynamicSensorCallback: SensorManager.DynamicSensorCallback? = null
     private var lastSensorTempUpdateMs: Long = 0L
     private var lastSensorHumUpdateMs: Long = 0L
     private var lastSensorTempC: Double? = null
@@ -181,28 +166,38 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
             val raw = ev.values.firstOrNull() ?: return
             if (raw.isNaN() || raw.isInfinite()) return
             val now = android.os.SystemClock.elapsedRealtime()
-            when (ev.sensor.type) {
-                Sensor.TYPE_AMBIENT_TEMPERATURE -> {
-                    if (raw !in -60f..100f) return
-                    val tempC = (raw * 10f).roundToInt() / 10.0
-                    val prev = lastSensorTempC
-                    if (prev == null || abs(tempC - prev) >= 0.1 || now - lastSensorTempUpdateMs >= 1500L) {
-                        lastSensorTempC = tempC
-                        lastSensorTempUpdateMs = now
-                        _uiState.update {
-                            it.copy(deviceClimate = it.deviceClimate.copy(tempC = tempC))
-                        }
+            val s = ev.sensor
+            val isTemp = s in registeredTempSensors || s.type == Sensor.TYPE_AMBIENT_TEMPERATURE
+            val isHum = s in registeredHumSensors || s.type == Sensor.TYPE_RELATIVE_HUMIDITY
+            if (isTemp) {
+                if (raw !in -60f..100f) return
+                val tempC = (raw * 10f).roundToInt() / 10.0
+                val prev = lastSensorTempC
+                if (prev == null || abs(tempC - prev) >= 0.1 || now - lastSensorTempUpdateMs >= 1500L) {
+                    lastSensorTempC = tempC
+                    lastSensorTempUpdateMs = now
+                    _uiState.update {
+                        it.copy(
+                            deviceClimate = it.deviceClimate.copy(
+                                hasTempSensor = true,
+                                tempC = tempC
+                            )
+                        )
                     }
                 }
-                Sensor.TYPE_RELATIVE_HUMIDITY -> {
-                    val pct = raw.roundToInt().coerceIn(0, 100)
-                    val prev = lastSensorHumidity
-                    if (prev == null || pct != prev || now - lastSensorHumUpdateMs >= 1500L) {
-                        lastSensorHumidity = pct
-                        lastSensorHumUpdateMs = now
-                        _uiState.update {
-                            it.copy(deviceClimate = it.deviceClimate.copy(humidity = pct))
-                        }
+            } else if (isHum) {
+                val pct = raw.roundToInt().coerceIn(0, 100)
+                val prev = lastSensorHumidity
+                if (prev == null || pct != prev || now - lastSensorHumUpdateMs >= 1500L) {
+                    lastSensorHumidity = pct
+                    lastSensorHumUpdateMs = now
+                    _uiState.update {
+                        it.copy(
+                            deviceClimate = it.deviceClimate.copy(
+                                hasHumiditySensor = true,
+                                humidity = pct
+                            )
+                        )
                     }
                 }
             }
@@ -290,10 +285,10 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                 priceUrls = PriceKind.entries.associateWith { k -> priceUrl(k) },
                 wxProvinceLabel = wxProvinceLabel(lang == "en"),
                 wxWardLabel = wxWardLabel(lang == "en"),
-                bluetoothStatus = readBluetoothStatus(lang == "en"),
+                bluetoothStatus = SystemTelemetry.readBluetoothStatus(app, lang == "en"),
                 volumeLevel = volCur,
                 volumeMax = volMax,
-                localIp = localIp(),
+                localIp = SystemTelemetry.lanIp(),
                 hasPersonalAiKey = getPersonalGeminiApiKey(app) != null,
                 maskedPersonalAiKey = maskGeminiApiKey(getPersonalGeminiApiKey(app))
             )
@@ -349,31 +344,91 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         stopUploadServer()
     }
 
+    private fun isAmbientTempSensor(s: Sensor): Boolean {
+        if (s.type == Sensor.TYPE_AMBIENT_TEMPERATURE) return true
+        val meta = "${s.stringType} ${s.name}".lowercase(Locale.ROOT)
+        @Suppress("DEPRECATION")
+        if (s.type == Sensor.TYPE_TEMPERATURE) {
+            // Exclude internal CPU/GPU/battery thermal sensors on TV boxes when using legacy TYPE_TEMPERATURE
+            return !meta.contains("cpu") && !meta.contains("gpu") && !meta.contains("soc") &&
+                !meta.contains("battery") && !meta.contains("skin") && !meta.contains("board")
+        }
+        return meta.contains("ambient_temperature") ||
+            (meta.contains("temp") && (meta.contains("ambient") || meta.contains("room") ||
+                meta.contains("sht") || meta.contains("bme") || meta.contains("dht") ||
+                meta.contains("aht") || meta.contains("hdc")))
+    }
+
+    private fun isHumiditySensor(s: Sensor): Boolean {
+        if (s.type == Sensor.TYPE_RELATIVE_HUMIDITY) return true
+        val meta = "${s.stringType} ${s.name}".lowercase(Locale.ROOT)
+        return meta.contains("relative_humidity") || meta.contains("humidity") || meta.contains("humid")
+    }
+
     private fun startClimateSensors() {
         try {
             val sm = sensorManager ?: (app.getSystemService(Context.SENSOR_SERVICE) as? SensorManager)
-                ?.also { sensorManager = it }
-            val tempSensor = sm?.getDefaultSensor(Sensor.TYPE_AMBIENT_TEMPERATURE)
-            val humSensor = sm?.getDefaultSensor(Sensor.TYPE_RELATIVE_HUMIDITY)
-            val hasTemp = tempSensor != null
-            val hasHum = humSensor != null
+                ?.also { sensorManager = it } ?: return
+
+            val allCandidates = LinkedHashSet<Sensor>().apply {
+                sm.getDefaultSensor(Sensor.TYPE_AMBIENT_TEMPERATURE)?.let(::add)
+                sm.getDefaultSensor(Sensor.TYPE_AMBIENT_TEMPERATURE, true)?.let(::add)
+                sm.getDefaultSensor(Sensor.TYPE_RELATIVE_HUMIDITY)?.let(::add)
+                sm.getDefaultSensor(Sensor.TYPE_RELATIVE_HUMIDITY, true)?.let(::add)
+                addAll(sm.getSensorList(Sensor.TYPE_ALL))
+                if (sm.isDynamicSensorDiscoverySupported) {
+                    addAll(sm.getDynamicSensorList(Sensor.TYPE_ALL))
+                }
+            }
+
+            val tempSensors = allCandidates.filter(::isAmbientTempSensor)
+            val humSensors = allCandidates.filter(::isHumiditySensor)
+
             _uiState.update {
                 it.copy(
                     deviceClimate = it.deviceClimate.copy(
-                        hasTempSensor = hasTemp,
-                        hasHumiditySensor = hasHum
+                        hasTempSensor = tempSensors.isNotEmpty(),
+                        hasHumiditySensor = humSensors.isNotEmpty()
                     )
                 )
             }
-            if (!prefs.getBoolean("humidityOn", true) || (!hasTemp && !hasHum) || sensorsRegistered) {
-                return
+
+            if (!prefs.getBoolean("humidityOn", true) || sensorsRegistered) return
+
+            if (sm.isDynamicSensorDiscoverySupported && dynamicSensorCallback == null) {
+                val cb = object : SensorManager.DynamicSensorCallback() {
+                    override fun onDynamicSensorConnected(sensor: Sensor) {
+                        if (isAmbientTempSensor(sensor) || isHumiditySensor(sensor)) {
+                            stopClimateSensors()
+                            startClimateSensors()
+                        }
+                    }
+
+                    override fun onDynamicSensorDisconnected(sensor: Sensor) {
+                        if (sensor in registeredTempSensors || sensor in registeredHumSensors) {
+                            stopClimateSensors()
+                            startClimateSensors()
+                        }
+                    }
+                }
+                dynamicSensorCallback = cb
+                sm.registerDynamicSensorCallback(cb)
             }
+
+            if (tempSensors.isEmpty() && humSensors.isEmpty()) return
+
             var registered = false
-            if (tempSensor != null && sm.registerListener(climateSensorListener, tempSensor, SensorManager.SENSOR_DELAY_NORMAL)) {
-                registered = true
+            for (s in tempSensors) {
+                if (sm.registerListener(climateSensorListener, s, SensorManager.SENSOR_DELAY_UI, 0)) {
+                    registeredTempSensors.add(s)
+                    registered = true
+                }
             }
-            if (humSensor != null && sm.registerListener(climateSensorListener, humSensor, SensorManager.SENSOR_DELAY_NORMAL)) {
-                registered = true
+            for (s in humSensors) {
+                if (sm.registerListener(climateSensorListener, s, SensorManager.SENSOR_DELAY_UI, 0)) {
+                    registeredHumSensors.add(s)
+                    registered = true
+                }
             }
             sensorsRegistered = registered
         } catch (_: Throwable) {
@@ -381,13 +436,22 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     }
 
     private fun stopClimateSensors() {
-        if (!sensorsRegistered) return
         try {
-            sensorManager?.unregisterListener(climateSensorListener)
+            dynamicSensorCallback?.let { sensorManager?.unregisterDynamicSensorCallback(it) }
         } catch (_: Throwable) {
         } finally {
-            sensorsRegistered = false
+            dynamicSensorCallback = null
         }
+        if (sensorsRegistered) {
+            try {
+                sensorManager?.unregisterListener(climateSensorListener)
+            } catch (_: Throwable) {
+            } finally {
+                sensorsRegistered = false
+            }
+        }
+        registeredTempSensors.clear()
+        registeredHumSensors.clear()
     }
 
     fun onHomePressed() {
@@ -519,114 +583,19 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     // ---------------------------------------------------------------- Sys Bars & Network & USB & Now Playing
     private fun updateSysBars() {
         if (!_uiState.value.display.barsOn) return
-        try {
-            val st = StatFs(Environment.getDataDirectory().path)
-            val total = st.totalBytes
-            val free = st.availableBytes
-            val used = total - free
-            val sPct = if (total > 0) ((used * 100) / total).toInt() else 0
-
-            val am = app.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
-            val mi = ActivityManager.MemoryInfo()
-            am?.getMemoryInfo(mi)
-            val ramUsed = mi.totalMem - mi.availMem
-            val rPct = if (mi.totalMem > 0) ((ramUsed * 100) / mi.totalMem).toInt() else 0
-
-            _uiState.update {
-                it.copy(
-                    sysBars = SystemBarsState(
-                        enabled = true,
-                        storageUsedGb = used / 1073741824.0,
-                        storageTotalGb = total / 1073741824.0,
-                        storagePercent = sPct,
-                        ramUsedGb = ramUsed / 1073741824.0,
-                        ramTotalGb = mi.totalMem / 1073741824.0,
-                        ramPercent = rPct
-                    )
-                )
-            }
-        } catch (_: Exception) {
-        }
+        val bars = SystemTelemetry.readSystemBars(app) ?: return
+        _uiState.update { it.copy(sysBars = bars) }
     }
 
     private fun updateNetwork() {
         val en = _uiState.value.isEnglish
-        var isEth = false
-        var isOffline = false
-        val label = try {
-            val cm = app.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-            val net = cm?.activeNetwork
-            val nc = if (net != null) cm.getNetworkCapabilities(net) else null
-            when {
-                nc != null && nc.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> {
-                    isEth = true
-                    "LAN"
-                }
-                nc != null && nc.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> wifiName()
-                else -> {
-                    isOffline = true
-                    if (en) "Offline" else "Chưa kết nối"
-                }
-            }
-        } catch (_: Exception) {
-            "Wi-Fi"
-        }
-
         _uiState.update {
-            it.copy(
-                networkPill = NetworkPillState(
-                    visible = it.display.wifiOn,
-                    label = label,
-                    isEthernet = isEth,
-                    isOffline = isOffline
-                )
-            )
+            it.copy(networkPill = SystemTelemetry.readNetworkPill(app, it.display.wifiOn, en))
         }
-    }
-
-    @Suppress("DEPRECATION")
-    private fun wifiName(): String {
-        try {
-            val wm = app.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
-            val ssid = wm?.connectionInfo?.ssid
-            if (!ssid.isNullOrEmpty() && !ssid.contains("unknown ssid") && ssid != "0x") {
-                return if (ssid.length > 1 && ssid.startsWith("\"") && ssid.endsWith("\"")) {
-                    ssid.substring(1, ssid.length - 1)
-                } else {
-                    ssid
-                }
-            }
-        } catch (_: Exception) {
-        }
-        return "Wi-Fi"
-    }
-
-    private fun usbConnected(): Boolean {
-        try {
-            val sm = app.getSystemService(Context.STORAGE_SERVICE) as? StorageManager
-            if (sm != null && Build.VERSION.SDK_INT >= 24) {
-                for (v in sm.storageVolumes) {
-                    if (v.isRemovable && Environment.MEDIA_MOUNTED == v.state) return true
-                }
-            }
-        } catch (_: Throwable) {
-        }
-        try {
-            val um = app.getSystemService(Context.USB_SERVICE) as? UsbManager
-            if (um != null) {
-                for (d in um.deviceList.values) {
-                    for (i in 0 until d.interfaceCount) {
-                        if (d.getInterface(i).interfaceClass == UsbConstants.USB_CLASS_MASS_STORAGE) return true
-                    }
-                }
-            }
-        } catch (_: Throwable) {
-        }
-        return false
     }
 
     private fun updateStatusPills() {
-        val usb = usbConnected()
+        val usb = SystemTelemetry.isUsbStorageConnected(app)
         val nowPlaying = if (_uiState.value.display.musicOn) currentMusicPill() else NowPlayingPillState(visible = false)
         _uiState.update {
             it.copy(
@@ -1231,8 +1200,8 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         playSelect()
         _uiState.update {
             it.copy(
-                bluetoothStatus = readBluetoothStatus(it.isEnglish),
-                localIp = localIp(),
+                bluetoothStatus = SystemTelemetry.readBluetoothStatus(app, it.isEnglish),
+                localIp = SystemTelemetry.lanIp(),
                 activeDialog = ActiveDialog.SettingsMain
             )
         }
@@ -1278,7 +1247,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                     lang = langCode,
                     wxProvinceLabel = wxProvinceLabel(en),
                     wxWardLabel = wxWardLabel(en),
-                    bluetoothStatus = readBluetoothStatus(en),
+                    bluetoothStatus = SystemTelemetry.readBluetoothStatus(app, en),
                     activeDialog = null
                 )
             }
@@ -1422,7 +1391,8 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         val dm = app.resources.displayMetrics
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val bm = decodeCover(opener, dm.widthPixels, dm.heightPixels) ?: throw IllegalStateException("decode")
+                val bm = QrUploadHelper.decodeCoverBitmap(opener, dm.widthPixels, dm.heightPixels)
+                    ?: throw IllegalStateException("decode")
                 FileOutputStream(File(app.filesDir, "wallpaper.jpg")).use { os ->
                     bm.compress(Bitmap.CompressFormat.JPEG, 90, os)
                 }
@@ -1445,23 +1415,6 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    private fun decodeCover(opener: () -> InputStream, w: Int, h: Int): Bitmap? {
-        val op = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        opener().use { BitmapFactory.decodeStream(it, null, op) }
-        var s = 1
-        while (op.outWidth / (s * 2) >= w && op.outHeight / (s * 2) >= h) s *= 2
-        op.inJustDecodeBounds = false
-        op.inSampleSize = s
-        val src = opener().use { BitmapFactory.decodeStream(it, null, op) } ?: return null
-        val scale = maxOf(w.toFloat() / src.width, h.toFloat() / src.height)
-        val cw = minOf(src.width, Math.round(w / scale))
-        val ch = minOf(src.height, Math.round(h / scale))
-        val x = maxOf(0, (src.width - cw) / 2)
-        val y = maxOf(0, (src.height - ch) / 2)
-        val crop = Bitmap.createBitmap(src, x, y, cw, ch)
-        return Bitmap.createScaledBitmap(crop, w, h, true)
-    }
-
     fun openLocalWallpapers() {
         val dir = app.getExternalFilesDir("wallpapers")
         val files = dir?.listFiles { _, name ->
@@ -1474,7 +1427,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun startQrUpload() {
-        val ip = lanIp()
+        val ip = SystemTelemetry.lanIp()
         if (ip == null) {
             toast(tr("TV chưa kết nối mạng", "The TV is not connected to a network"))
             return
@@ -1482,7 +1435,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         stopUploadServer()
         val rnd = ByteArray(9).also { SecureRandom().nextBytes(it) }
         val token = rnd.joinToString("") { String.format(Locale.US, "%02x", it) }
-        val page = buildUploadPage(token)
+        val page = QrUploadHelper.buildWallpaperUploadHtml(app, token, _uiState.value.isEnglish)
         try {
             val srv = UploadServer(token, page) { data ->
                 applyCustomAsync { ByteArrayInputStream(data) }
@@ -1490,7 +1443,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
             val port = srv.start()
             uploadServer = srv
             val url = "http://$ip:$port/$token"
-            val qrBitmap = makeQr(url, 480)
+            val qrBitmap = QrUploadHelper.makeQrBitmap(url, 480)
             _uiState.update { it.copy(activeDialog = ActiveDialog.QrUpload(url, qrBitmap)) }
         } catch (_: Exception) {
             stopUploadServer()
@@ -1499,7 +1452,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun startApiKeyQrUpload(returnQuery: String? = null) {
-        val ip = lanIp()
+        val ip = SystemTelemetry.lanIp()
         if (ip == null) {
             toast(tr("TV chưa kết nối mạng", "The TV is not connected to a network"))
             return
@@ -1507,7 +1460,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         stopUploadServer()
         val rnd = ByteArray(9).also { SecureRandom().nextBytes(it) }
         val token = rnd.joinToString("") { String.format(Locale.US, "%02x", it) }
-        val page = buildApiKeyUploadPage(token)
+        val page = QrUploadHelper.buildApiKeyUploadHtml(token, _uiState.value.isEnglish)
         try {
             val srv = UploadServer(token, page) { data ->
                 val receivedKey = String(data, Charsets.UTF_8).trim()
@@ -1521,7 +1474,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
             val port = srv.start()
             uploadServer = srv
             val url = "http://$ip:$port/$token"
-            val qrBitmap = makeQr(url, 480)
+            val qrBitmap = QrUploadHelper.makeQrBitmap(url, 480)
             _uiState.update { it.copy(activeDialog = ActiveDialog.QrApiKeyUpload(url, qrBitmap, returnQuery)) }
         } catch (_: Exception) {
             stopUploadServer()
@@ -1532,88 +1485,6 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     private fun stopUploadServer() {
         uploadServer?.stop()
         uploadServer = null
-    }
-
-    private fun buildApiKeyUploadPage(token: String): String {
-        val title = tr("Nhập Gemini API Key cho TV", "Send Gemini API Key to TV")
-        val hint = tr(
-            "Lấy key miễn phí tại aistudio.google.com/apikey, dán vào ô dưới rồi bấm Gửi.",
-            "Get a key at aistudio.google.com/apikey, paste it below and tap Send."
-        )
-        val placeholder = "AIzaSy..."
-        val btn = tr("Gửi lên TV", "Send to TV")
-        val emptyMsg = tr("Hãy dán Gemini API Key trước", "Please paste your Gemini API key first")
-        val doneMsg = tr("Đã gửi thành công! Xem trên màn hình TV.", "Sent! Check your TV screen.")
-        val errMsg = tr("Gửi thất bại, hãy thử lại.", "Failed, please try again.")
-        return """
-            <!DOCTYPE html>
-            <html><head><meta charset="utf-8">
-            <meta name="viewport" content="width=device-width,initial-scale=1">
-            <title>$title</title>
-            <style>
-            body{font-family:-apple-system,Helvetica,Arial,sans-serif;background:#1c1c1e;color:#fff;margin:0;padding:24px;text-align:center}
-            h1{font-size:20px;margin-bottom:8px}
-            p{color:#c7c7cc;font-size:14px;line-height:1.5}
-            a{color:#64d2ff}
-            input{width:100%;max-width:420px;box-sizing:border-box;margin-top:14px;padding:14px;border-radius:12px;border:1px solid #48484a;background:#2c2c2e;color:#fff;font-size:15px}
-            button{background:#0a84ff;color:#fff;border:0;border-radius:12px;font-size:17px;padding:14px 28px;margin-top:16px;width:100%;max-width:420px}
-            #s{margin-top:16px;font-size:15px;color:#30d158}
-            </style></head><body>
-            <h1>$title</h1>
-            <p>$hint<br><a href="https://aistudio.google.com/apikey" target="_blank">aistudio.google.com/apikey</a></p>
-            <input type="text" id="k" placeholder="$placeholder" autocomplete="off" autocapitalize="off" spellcheck="false">
-            <button onclick="send()">$btn</button>
-            <div id="s"></div>
-            <script>
-            function send(){
-              var v=document.getElementById('k').value.trim();
-              if(v.length<12){alert('$emptyMsg');return;}
-              var s=document.getElementById('s');
-              s.innerText='...';
-              var r=new XMLHttpRequest();
-              r.open('POST','/$token/up');
-              r.setRequestHeader('Content-Type','text/plain;charset=UTF-8');
-              r.onload=function(){
-                if(r.status==200){s.style.color='#30d158';s.innerText='$doneMsg';}
-                else{s.style.color='#ff453a';s.innerText='$errMsg';}
-              };
-              r.onerror=function(){s.style.color='#ff453a';s.innerText='$errMsg';};
-              r.send(v);
-            }
-            </script></body></html>
-        """.trimIndent()
-    }
-
-    private fun buildUploadPage(token: String): String {
-        return try {
-            app.resources.openRawResource(R.raw.upload_page).bufferedReader(Charsets.UTF_8).use { it.readText() }
-                .replace("@TITLE@", tr("Gửi ảnh nền cho TV", "Send a wallpaper to the TV"))
-                .replace("@HINT@", tr("Chọn một ảnh trong điện thoại rồi bấm Gửi.", "Pick a photo from your phone, then tap Send."))
-                .replace("@BTN@", tr("Gửi", "Send"))
-                .replace("@PICK@", tr("Chưa chọn ảnh", "Pick a photo first"))
-                .replace("@DONE@", tr("Đã gửi! Xem trên TV.", "Sent! Check the TV."))
-                .replace("@ERR@", tr("Gửi thất bại, hãy thử lại.", "Failed, please try again."))
-                .replace("@TOKEN@", token)
-        } catch (_: Exception) {
-            "<html><body>Error</body></html>"
-        }
-    }
-
-    private fun makeQr(text: String, sizePx: Int): Bitmap? {
-        return try {
-            val hints = mapOf(EncodeHintType.MARGIN to 1)
-            val m = QRCodeWriter().encode(text, BarcodeFormat.QR_CODE, sizePx, sizePx, hints)
-            val w = m.width
-            val h = m.height
-            val px = IntArray(w * h) { idx ->
-                val x = idx % w
-                val y = idx / w
-                if (m.get(x, y)) 0xFF000000.toInt() else 0xFFFFFFFF.toInt()
-            }
-            Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).apply { setPixels(px, 0, w, 0, 0, w, h) }
-        } catch (_: Exception) {
-            null
-        }
     }
 
     // ---------------------------------------------------------------- Quick Tiles & ADB
@@ -2266,7 +2137,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
             if (n.isEmpty()) continue
             var chPart = n
             var target: String? = null
-            val m = VOICE_ON.matchEntire(n)
+            val m = VoiceChannelDirectory.VOICE_ON.matchEntire(n)
             if (m != null) {
                 chPart = m.groupValues[1]
                 target = m.groupValues[2]
@@ -2469,25 +2340,13 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         return false
     }
 
-    private fun voiceScore(a: AppItem, qk: String): Int {
-        val lk = VoiceCommand.key(VoiceCommand.norm(a.label))
-        var sc = VoiceCommand.scoreKeys(lk, qk)
-        if (VoiceCommand.canonApp(lk) == qk) sc = maxOf(sc, 100)
-        if (qk == "googleplay" && (a.pkg == "com.android.vending" || lk.contains("googleplay") ||
-                lk.contains("chplay") || lk.contains("cuahangplay") || lk.contains("playstore"))
-        ) {
-            sc = maxOf(sc, 100)
-        }
-        return sc
-    }
-
     private fun findAppByVoice(n: String): AppItem? {
         val qk = VoiceCommand.canonApp(VoiceCommand.key(n))
         var best: AppItem? = null
         var bestScore = 0
         for (a in _uiState.value.allApps) {
             if (a.isSelf) continue
-            val sc = voiceScore(a, qk)
+            val sc = VoiceChannelDirectory.voiceScore(a, qk)
             if (sc > bestScore) {
                 bestScore = sc
                 best = a
@@ -2500,30 +2359,17 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         val k = VoiceCommand.key(VoiceCommand.canonChannel(chPart))
         if (k.isEmpty()) return false
         return findChannelIn("fpt", k) != null || findChannelIn("vtvgo", k) != null ||
-            findChannelIn("vieon", k) != null || k.matches(CHANNEL_REGEX)
-    }
-
-    private fun lookupChannel(list: String, k: String): Pair<String, String>? {
-        for (e in list.split(",")) {
-            val bar = e.indexOf('|')
-            if (bar <= 0) continue
-            val name = e.substring(0, bar).trim()
-            val link = e.substring(bar + 1).trim()
-            if (link.isNotEmpty() && VoiceCommand.key(VoiceCommand.norm(name)) == k) {
-                return name to link
-            }
-        }
-        return null
+            findChannelIn("vieon", k) != null || k.matches(VoiceChannelDirectory.CHANNEL_REGEX)
     }
 
     private fun findChannelIn(kind: String, k: String): Pair<String, String>? {
-        if (kind == "vtvgo") return lookupChannel(vtvgoList(), k)
-        if (kind == "vieon") return lookupChannel(vieonList(), k)
+        if (kind == "vtvgo") return VoiceChannelDirectory.lookupChannel(vtvgoList(), k)
+        if (kind == "vieon") return VoiceChannelDirectory.lookupChannel(vieonList(), k)
         for (i in 0..1) {
             if (VoiceCommand.key(VoiceCommand.norm(chName(i))) == k) return chName(i) to chLink(i)
         }
-        lookupChannel(channelList(), k)?.let { return it }
-        if (k.matches(CHANNEL_REGEX) && findByLabel("fpt play") != null) {
+        VoiceChannelDirectory.lookupChannel(channelList(), k)?.let { return it }
+        if (k.matches(VoiceChannelDirectory.CHANNEL_REGEX) && findByLabel("fpt play") != null) {
             val slug = if (k.startsWith("vtv") || k.startsWith("htv")) "$k-hd" else k
             return k.uppercase(Locale.ROOT) to "https://fptplay.vn/xem-truyen-hinh/$slug"
         }
@@ -2566,9 +2412,12 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    private fun channelList(): String = prefs.getString("chList", DEFAULT_CHANNEL_LIST) ?: DEFAULT_CHANNEL_LIST
-    private fun vtvgoList(): String = prefs.getString("chListVtvgo", defaultVtvgoList()) ?: defaultVtvgoList()
-    private fun vieonList(): String = prefs.getString("chListVieon", defaultVieonList()) ?: defaultVieonList()
+    private fun channelList(): String = prefs.getString("chList", VoiceChannelDirectory.DEFAULT_CHANNEL_LIST)
+        ?: VoiceChannelDirectory.DEFAULT_CHANNEL_LIST
+    private fun vtvgoList(): String = prefs.getString("chListVtvgo", VoiceChannelDirectory.defaultVtvgoList())
+        ?: VoiceChannelDirectory.defaultVtvgoList()
+    private fun vieonList(): String = prefs.getString("chListVieon", VoiceChannelDirectory.defaultVieonList())
+        ?: VoiceChannelDirectory.defaultVieonList()
 
     fun saveVoiceChannels(fpt: String, vtvgo: String, vieon: String) {
         prefs.edit().putString("chList", fpt).putString("chListVtvgo", vtvgo).putString("chListVieon", vieon).apply()
@@ -2803,6 +2652,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                             .putFloat("w_max", d.max.toFloat())
                             .putInt("w_code", d.code)
                             .putInt("w_rain", d.rain)
+                            .putInt("w_humidity", d.humidity)
                             .putString("w_city", d.city)
                             .putLong("w_time", System.currentTimeMillis())
                             .apply()
@@ -3208,45 +3058,9 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
 
     // ---------------------------------------------------------------- Helpers
     private fun appVersion(): String = try {
-        app.packageManager.getPackageInfo(app.packageName, 0).versionName ?: "3.0.0"
+        app.packageManager.getPackageInfo(app.packageName, 0).versionName ?: "3.0.2"
     } catch (_: Exception) {
-        "3.0.0"
-    }
-
-    private fun readBluetoothStatus(en: Boolean): String = try {
-        val bm = app.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
-        val ad = bm?.adapter
-        when {
-            ad == null -> if (en) "Not available" else "Không có"
-            ad.isEnabled -> if (en) "On" else "Đang bật"
-            else -> if (en) "Off" else "Đã tắt"
-        }
-    } catch (_: Throwable) {
-        "—"
-    }
-
-    private fun localIp(): String? = lanIp()
-
-    private fun lanIp(): String? {
-        var fallback: String? = null
-        try {
-            val nis = NetworkInterface.getNetworkInterfaces() ?: return null
-            while (nis.hasMoreElements()) {
-                val ni = nis.nextElement()
-                if (!ni.isUp || ni.isLoopback) continue
-                val n = ni.name
-                val addrs = ni.inetAddresses
-                while (addrs.hasMoreElements()) {
-                    val a = addrs.nextElement()
-                    if (a is Inet4Address && !a.isLoopbackAddress) {
-                        if (n.startsWith("wlan") || n.startsWith("eth")) return a.hostAddress
-                        if (fallback == null) fallback = a.hostAddress
-                    }
-                }
-            }
-        } catch (_: Exception) {
-        }
-        return fallback
+        "3.0.2"
     }
 
     override fun onCleared() {
@@ -3272,24 +3086,5 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
             "January", "February", "March", "April", "May", "June",
             "July", "August", "September", "October", "November", "December"
         )
-        private val CHANNEL_REGEX = Regex("(vtv|htv)\\d{1,2}|(thvl|vtc|antv|vov)\\d{0,2}|vtvcantho|quochoi|nhandan")
-        private val VOICE_ON = Regex("^(.*?)\\s+(?:tren ung dung|tren|trong|bang|qua|on|in|using|with)\\s+(.+)$")
-
-        private const val DEFAULT_CHANNEL_LIST =
-            "THVL1|https://fptplay.vn/xem-truyen-hinh/thvl1, THVL2|https://fptplay.vn/xem-truyen-hinh/thvl2, " +
-                "VTV1|https://fptplay.vn/xem-truyen-hinh/vtv1-hd, VTV2|https://fptplay.vn/xem-truyen-hinh/vtv2-hd, " +
-                "VTV3|https://fptplay.vn/xem-truyen-hinh/vtv3-hd, VTV4|https://fptplay.vn/xem-truyen-hinh/vtv4-hd, " +
-                "VTV5|https://fptplay.vn/xem-truyen-hinh/vtv5-hd, VTV6|https://fptplay.vn/xem-truyen-hinh/vtv6-hd, " +
-                "VTV7|https://fptplay.vn/xem-truyen-hinh/vtv7-hd, VTV8|https://fptplay.vn/xem-truyen-hinh/vtv8-hd, " +
-                "VTV9|https://fptplay.vn/xem-truyen-hinh/vtv9-hd, HTV7|https://fptplay.vn/xem-truyen-hinh/htv7-hd, " +
-                "HTV9|https://fptplay.vn/xem-truyen-hinh/htv9-hd"
-
-        private fun defaultVtvgoList(): String = (1..9).joinToString(", ") { i ->
-            "VTV$i|https://vtvgo.vn/xem-truc-tuyen-kenh-vtv$i-$i.html"
-        }
-
-        private fun defaultVieonList(): String = (1..9).joinToString(", ") { i ->
-            "VTV$i|https://vieon.vn/truyen-hinh-truc-tuyen/vtv$i-hd"
-        }
     }
 }

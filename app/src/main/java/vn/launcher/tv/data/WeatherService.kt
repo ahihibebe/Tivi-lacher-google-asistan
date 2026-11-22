@@ -116,7 +116,16 @@ object WeatherService {
             val list = g.getFromLocation(lat, lon, 1)
             if (!list.isNullOrEmpty()) {
                 val a = list[0]
-                a.subAdminArea ?: a.locality ?: a.adminArea
+                val parts = listOfNotNull(
+                    a.subLocality?.trim()?.takeIf { it.isNotEmpty() },
+                    (a.subAdminArea ?: a.locality)?.trim()?.takeIf { it.isNotEmpty() },
+                    a.adminArea?.trim()?.takeIf { it.isNotEmpty() }
+                ).distinct()
+                when {
+                    parts.size >= 2 -> "${parts[0]}, ${parts[1]}"
+                    parts.size == 1 -> parts[0]
+                    else -> null
+                }
             } else {
                 null
             }

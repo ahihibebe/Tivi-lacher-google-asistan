@@ -61,17 +61,13 @@ class MainActivity : ComponentActivity() {
     private val pickWallpaperLauncher = registerForActivityResult(
         ActivityResultContracts.PickVisualMedia()
     ) { uri ->
-        if (uri != null) {
-            vm.applyCustomWallpaperFromUri(uri)
-        }
+        if (uri != null) vm.applyCustomWallpaperFromUri(uri)
     }
 
     private val openDocWallpaperLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
-        if (uri != null) {
-            vm.applyCustomWallpaperFromUri(uri)
-        }
+        if (uri != null) vm.applyCustomWallpaperFromUri(uri)
     }
 
     private val defaultHomeRoleLauncher = registerForActivityResult(
@@ -153,12 +149,11 @@ class MainActivity : ComponentActivity() {
             }
 
             BackHandler(
-                enabled = state.activeDialog == null &&
-                    !state.slideshow.fullscreenOpen &&
-                    state.movingPkg == null
+                enabled = state.activeDialog == null && !state.slideshow.fullscreenOpen
             ) {
-                if (scrollState.value > 40) {
-                    scope.launch { scrollState.animateScrollTo(0) }
+                when {
+                    state.movingPkg != null -> vm.endMove()
+                    scrollState.value > 40 -> scope.launch { scrollState.animateScrollTo(0) }
                 }
             }
 
@@ -279,7 +274,6 @@ class MainActivity : ComponentActivity() {
                         }
                         KeyEvent.KEYCODE_DPAD_CENTER,
                         KeyEvent.KEYCODE_ENTER,
-                        KeyEvent.KEYCODE_BACK,
                         KeyEvent.KEYCODE_ESCAPE -> {
                             if (event.repeatCount == 0) vm.endMove()
                             return true
@@ -293,7 +287,6 @@ class MainActivity : ComponentActivity() {
                         KeyEvent.KEYCODE_DPAD_DOWN,
                         KeyEvent.KEYCODE_DPAD_CENTER,
                         KeyEvent.KEYCODE_ENTER,
-                        KeyEvent.KEYCODE_BACK,
                         KeyEvent.KEYCODE_ESCAPE -> return true
                     }
                 }

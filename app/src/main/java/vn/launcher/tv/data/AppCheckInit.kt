@@ -16,6 +16,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import vn.launcher.tv.BuildConfig
+import vn.launcher.tv.R
 import java.util.UUID
 import kotlin.coroutines.resume
 
@@ -26,7 +27,6 @@ private const val TAG = "AppCheckInit"
 private const val DEBUG_TOKEN_EXTRA = "FIREBASE_APPCHECK_DEBUG_TOKEN"
 private const val DEBUG_STORE_PREFIX = "com.google.firebase.appcheck.debug.store."
 private const val DEBUG_SECRET_KEY = "com.google.firebase.appcheck.debug.DEBUG_SECRET"
-private const val RECAPTCHA_SITE_KEY_RES = "recaptcha_site_key"
 
 private const val CUSTOM_PREFS = "app_check_cfg"
 private const val KEY_CUSTOM_DEBUG_TOKEN = "custom_debug_token"
@@ -274,12 +274,12 @@ private fun writeDebugSecretSync(context: Context, debugToken: String) {
 }
 
 private fun resolveRecaptchaSiteKey(context: Context): String? {
-    val resId = context.resources.getIdentifier(RECAPTCHA_SITE_KEY_RES, "string", context.packageName)
-    if (resId == 0) {
+    return try {
+        context.getString(R.string.recaptcha_site_key).trim().takeIf { it.isNotBlank() }
+    } catch (_: Exception) {
         Log.e(TAG, "recaptcha_site_key string resource not found in package.")
-        return null
+        null
     }
-    return context.getString(resId).trim().takeIf { it.isNotBlank() }
 }
 
 private fun isLikelyEmulator(): Boolean {
