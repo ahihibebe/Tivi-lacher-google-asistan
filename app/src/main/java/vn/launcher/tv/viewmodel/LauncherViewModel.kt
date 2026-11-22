@@ -11,6 +11,7 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
+import android.database.ContentObserver
 import android.graphics.Bitmap
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -54,6 +55,7 @@ import vn.launcher.tv.data.LunarCalendar
 import vn.launcher.tv.data.MediaLibrary
 import vn.launcher.tv.data.PriceRepository
 import vn.launcher.tv.data.QrUploadHelper
+import vn.launcher.tv.data.SensorWidgetProvider
 import vn.launcher.tv.data.SystemTelemetry
 import vn.launcher.tv.data.UploadServer
 import vn.launcher.tv.data.VoiceChannelDirectory
@@ -157,6 +159,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     private val registeredTempSensors = HashSet<Sensor>()
     private val registeredHumSensors = HashSet<Sensor>()
     private var dynamicSensorCallback: SensorManager.DynamicSensorCallback? = null
+    private var seiSensorObserver: ContentObserver? = null
     private var lastSensorTempUpdateMs: Long = 0L
     private var lastSensorHumUpdateMs: Long = 0L
     private var lastSysfsPollMs: Long = 0L
@@ -386,6 +389,12 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
             val source = ClimateDataSource.fromId(prefs.getString("climateSource", ClimateDataSource.AUTO.id))
             if (!prefs.getBoolean("humidityOn", true) || source == ClimateDataSource.WEB) return
 
+            if (seiSensorObserver == null) {
+                seiSensorObserver = SensorWidgetProvider.registerObserver(app) {
+                    pollSysfsClimate(force = true)
+                }
+            }
+
             pollSysfsClimate(force = true)
 
             if (sm == null || sensorsRegistered) return
@@ -436,24 +445,32 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
 
     private fun pollSysfsClimate(force: Boolean = false) {
         val now = android.os.SystemClock.elapsedRealtime()
-        if (!force && now - lastSysfsPollMs < 6000L) return
+        if (!force && now - lastSysfsPollMs < 5000L) return
         lastSysfsPollMs = now
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val sysfs = DeviceClimateReader.readSysfsAndProps(app)
+                val providerReading = SensorWidgetProvider.read(app)
+                val sysfs = if (providerReading.tempC == null || providerReading.humidity == null) {
+                    DeviceClimateReader.readSysfsAndProps(app)
+                } else {
+                    DeviceClimateReader.SysfsReading()
+                }
                 val sm = sensorManager
-                val diag = DeviceClimateReader.buildSensorDiagnostic(sm, discoveredTempSensors, discoveredHumSensors, sysfs)
+                val hwDiag = DeviceClimateReader.buildSensorDiagnostic(sm, discoveredTempSensors, discoveredHumSensors, sysfs)
+                val fullDiag = listOf(providerReading.diagnostic, hwDiag)
+                    .filter { it.isNotBlank() }
+                    .joinToString(" | ")
                 _uiState.update { cur ->
                     val dc = cur.deviceClimate
-                    val nextTemp = lastSensorTempC ?: sysfs.tempC ?: dc.tempC
-                    val nextHum = lastSensorHumidity ?: sysfs.humidity ?: dc.humidity
+                    val nextTemp = providerReading.tempC ?: lastSensorTempC ?: sysfs.tempC ?: dc.tempC
+                    val nextHum = providerReading.humidity ?: lastSensorHumidity ?: sysfs.humidity ?: dc.humidity
                     cur.copy(
                         deviceClimate = dc.copy(
-                            hasTempSensor = dc.hasTempSensor || sysfs.hasTempNode || nextTemp != null,
-                            hasHumiditySensor = dc.hasHumiditySensor || sysfs.hasHumidityNode || nextHum != null,
+                            hasTempSensor = dc.hasTempSensor || providerReading.tempC != null || providerReading.available || sysfs.hasTempNode || nextTemp != null,
+                            hasHumiditySensor = dc.hasHumiditySensor || providerReading.humidity != null || providerReading.available || sysfs.hasHumidityNode || nextHum != null,
                             tempC = nextTemp,
                             humidity = nextHum,
-                            sensorDiagnostic = diag
+                            sensorDiagnostic = fullDiag
                         )
                     )
                 }
@@ -472,6 +489,8 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     }
 
     private fun stopClimateSensors() {
+        SensorWidgetProvider.unregisterObserver(app, seiSensorObserver)
+        seiSensorObserver = null
         try {
             dynamicSensorCallback?.let { sensorManager?.unregisterDynamicSensorCallback(it) }
         } catch (_: Throwable) {

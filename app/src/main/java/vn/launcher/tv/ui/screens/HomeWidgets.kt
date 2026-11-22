@@ -256,16 +256,13 @@ internal fun MiniStatCard(
             .clip(RoundedCornerShape(corner))
             .background(Color(0x1EFFFFFF), RoundedCornerShape(corner))
             .border(1.dp, Color(0x42FFFFFF), RoundedCornerShape(corner))
-            .padding(horizontal = hPad, vertical = vPad)
+            .padding(horizontal = hPad, vertical = vPad),
+        verticalArrangement = Arrangement.SpaceBetween
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-            modifier = Modifier.fillMaxWidth()
-        ) {
+        Column {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f, fill = false)
+                modifier = if (spec.expanded) Modifier.fillMaxWidth() else Modifier
             ) {
                 Box(
                     modifier = Modifier
@@ -282,89 +279,83 @@ internal fun MiniStatCard(
                     fontWeight = FontWeight.Bold,
                     letterSpacing = if (spec.expanded) 0.2.sp else 0.1.sp,
                     maxLines = if (spec.expanded) 2 else 1,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = if (spec.expanded) Modifier.weight(1f) else Modifier
                 )
-            }
-            if (spec.sourceIcon != null || spec.badge.isNotEmpty()) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(start = 5.dp)
-                ) {
-                    if (spec.sourceIcon != null) {
-                        Icon(
-                            imageVector = spec.sourceIcon,
-                            contentDescription = spec.sourceContentDescription,
-                            tint = spec.sourceIconTint,
-                            modifier = Modifier.size(9.5.dp)
-                        )
-                    }
-                    if (spec.badge.isNotEmpty()) {
-                        if (spec.sourceIcon != null) Spacer(Modifier.width(3.dp))
-                        Text(
-                            text = spec.badge,
-                            color = Color(0xCCFFFFFF),
-                            fontSize = if (spec.expanded) 7.2.sp else 6.8.sp,
-                            maxLines = 1
-                        )
-                    }
+                if (spec.sourceIcon != null) {
+                    Spacer(Modifier.width(4.dp))
+                    Icon(
+                        imageVector = spec.sourceIcon,
+                        contentDescription = spec.sourceContentDescription,
+                        tint = spec.sourceIconTint,
+                        modifier = Modifier.size(9.5.dp)
+                    )
+                }
+                if (spec.badge.isNotEmpty()) {
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = spec.badge,
+                        color = Color(0xCCFFFFFF),
+                        fontSize = if (spec.expanded) 7.2.sp else 6.8.sp,
+                        maxLines = 1
+                    )
                 }
             }
-        }
-        Spacer(Modifier.height(if (spec.expanded) 2.5.dp else 2.dp))
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(if (spec.expanded) 3.5.dp else 2.5.dp)
-        ) {
-            if (spec.mainIcon != null) {
-                Icon(
-                    imageVector = spec.mainIcon,
-                    contentDescription = null,
-                    tint = spec.mainIconTint,
-                    modifier = Modifier.size(if (spec.expanded) 12.dp else 9.5.dp)
-                )
-            }
-            Text(
-                text = spec.mainValue,
-                color = Color.White,
-                fontSize = when {
-                    spec.expanded -> 13.sp
-                    spec.subIcon != null -> 9.8.sp
-                    else -> 10.8.sp
-                },
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                softWrap = false
-            )
-            if (spec.subValue.isNotEmpty()) {
-                if (spec.subIcon != null) {
-                    Spacer(Modifier.width(1.dp))
+            Spacer(Modifier.height(if (spec.expanded) 2.5.dp else 2.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(if (spec.expanded) 3.5.dp else 2.5.dp)
+            ) {
+                if (spec.mainIcon != null) {
                     Icon(
-                        imageVector = spec.subIcon,
+                        imageVector = spec.mainIcon,
                         contentDescription = null,
-                        tint = spec.subIconTint,
-                        modifier = Modifier.size(if (spec.expanded) 10.5.dp else 9.5.dp)
+                        tint = spec.mainIconTint,
+                        modifier = Modifier.size(if (spec.expanded) 12.dp else 9.5.dp)
                     )
                 }
                 Text(
-                    text = spec.subValue,
-                    color = if (spec.subIcon != null) Color.White else Color(0xD9FFFFFF),
+                    text = spec.mainValue,
+                    color = Color.White,
                     fontSize = when {
-                        spec.expanded -> 8.2.sp
+                        spec.expanded -> 13.sp
                         spec.subIcon != null -> 9.8.sp
-                        else -> 7.sp
+                        else -> 10.8.sp
                     },
-                    fontWeight = if (spec.subIcon != null) FontWeight.Bold else FontWeight.Normal,
+                    fontWeight = FontWeight.Bold,
                     maxLines = 1,
-                    softWrap = false,
-                    overflow = TextOverflow.Ellipsis
+                    softWrap = false
                 )
+                if (spec.subValue.isNotEmpty()) {
+                    if (spec.subIcon != null) {
+                        Spacer(Modifier.width(1.dp))
+                        Icon(
+                            imageVector = spec.subIcon,
+                            contentDescription = null,
+                            tint = spec.subIconTint,
+                            modifier = Modifier.size(if (spec.expanded) 10.5.dp else 9.5.dp)
+                        )
+                    }
+                    Text(
+                        text = spec.subValue,
+                        color = if (spec.subIcon != null) Color.White else Color(0xD9FFFFFF),
+                        fontSize = when {
+                            spec.expanded -> 8.2.sp
+                            spec.subIcon != null -> 9.8.sp
+                            else -> 7.sp
+                        },
+                        fontWeight = if (spec.subIcon != null) FontWeight.Bold else FontWeight.Normal,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
         }
-        Spacer(Modifier.weight(1f, fill = true))
-        Spacer(Modifier.height(if (spec.expanded) 3.dp else 2.dp))
         val barH = if (spec.expanded) 3.dp else 2.dp
         Box(
             modifier = Modifier
+                .padding(top = if (spec.expanded) 3.dp else 2.5.dp)
                 .fillMaxWidth()
                 .height(barH)
                 .clip(RoundedCornerShape(1.5.dp))

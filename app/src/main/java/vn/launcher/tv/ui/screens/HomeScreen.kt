@@ -468,16 +468,19 @@ fun HomeScreen(
                                         modifier: Modifier = Modifier
                                     ) {
                                         Column(
-                                            modifier = modifier
-                                                .widthIn(max = maxTotalWidth)
-                                                .width(IntrinsicSize.Max),
+                                            modifier = modifier.widthIn(max = maxTotalWidth),
                                             verticalArrangement = Arrangement.spacedBy(5.dp)
                                         ) {
                                             when {
                                                 weatherCard != null && (bottomCards.size == 1 || bottomCards.size >= 3) -> {
+                                                    val wxW = (128 + (weatherCard.label.length - 8).coerceIn(0, 16) * 3)
+                                                        .dp
+                                                        .coerceAtMost(maxTotalWidth - 96.dp)
+                                                    val humCard = bottomCards[0]
+                                                    val rowTotalW = (wxW + 5.dp + 88.dp).coerceAtMost(maxTotalWidth)
                                                     Row(
                                                         modifier = Modifier
-                                                            .fillMaxWidth()
+                                                            .width(rowTotalW)
                                                             .height(IntrinsicSize.Min),
                                                         horizontalArrangement = Arrangement.spacedBy(5.dp)
                                                     ) {
@@ -485,20 +488,19 @@ fun HomeScreen(
                                                             spec = weatherCard,
                                                             modifier = Modifier
                                                                 .weight(1f)
-                                                                .widthIn(min = 120.dp, max = 188.dp)
                                                                 .fillMaxHeight()
                                                         )
                                                         MiniStatCard(
-                                                            spec = bottomCards[0],
+                                                            spec = humCard,
                                                             modifier = Modifier
-                                                                .wrapContentWidth()
+                                                                .width(IntrinsicSize.Max)
                                                                 .fillMaxHeight()
                                                         )
                                                     }
                                                     if (bottomCards.size > 1) {
                                                         Row(
                                                             modifier = Modifier
-                                                                .fillMaxWidth()
+                                                                .width(rowTotalW)
                                                                 .height(IntrinsicSize.Min),
                                                             horizontalArrangement = Arrangement.spacedBy(5.dp)
                                                         ) {
@@ -514,16 +516,18 @@ fun HomeScreen(
                                                     }
                                                 }
                                                 weatherCard != null -> {
+                                                    val minNeeded = if (bottomCards.isNotEmpty()) 188 else 128
+                                                    val wxW = (minNeeded + (weatherCard.label.length - 8).coerceIn(0, 20) * 3)
+                                                        .dp
+                                                        .coerceAtMost(maxTotalWidth)
                                                     MiniStatCard(
                                                         spec = weatherCard,
-                                                        modifier = Modifier
-                                                            .fillMaxWidth()
-                                                            .widthIn(min = 120.dp, max = maxTotalWidth)
+                                                        modifier = Modifier.width(wxW)
                                                     )
                                                     if (bottomCards.isNotEmpty()) {
                                                         Row(
                                                             modifier = Modifier
-                                                                .fillMaxWidth()
+                                                                .width(wxW)
                                                                 .height(IntrinsicSize.Min),
                                                             horizontalArrangement = Arrangement.spacedBy(5.dp)
                                                         ) {
@@ -540,15 +544,14 @@ fun HomeScreen(
                                                 }
                                                 bottomCards.isNotEmpty() -> {
                                                     Row(
-                                                        modifier = Modifier
-                                                            .height(IntrinsicSize.Min),
+                                                        modifier = Modifier.height(IntrinsicSize.Min),
                                                         horizontalArrangement = Arrangement.spacedBy(5.dp)
                                                     ) {
                                                         bottomCards.forEach { card ->
                                                             MiniStatCard(
                                                                 spec = card,
                                                                 modifier = Modifier
-                                                                    .wrapContentWidth()
+                                                                    .width(IntrinsicSize.Max)
                                                                     .fillMaxHeight()
                                                             )
                                                         }
