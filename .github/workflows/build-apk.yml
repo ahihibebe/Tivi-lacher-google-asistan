@@ -1,5 +1,9 @@
 name: Build APK
 on: [push, workflow_dispatch]
+
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -12,13 +16,14 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: 9.3.1
-      - name: Prepare debug keystore
+      - name: Prepare fixed keystore
         run: |
           if [ ! -f debug.keystore ]; then
             if [ -f debug.keystore.base64 ]; then
               base64 -d debug.keystore.base64 > debug.keystore
             else
-              keytool -genkeypair -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+              echo "ERROR: Missing debug.keystore.base64 fixed keystore file!" >&2
+              exit 1
             fi
           fi
       - name: Restore google-services.json from secret
@@ -30,11 +35,55 @@ jobs:
           fi
       - name: Build APKs (Release & Debug)
         run: gradle assembleRelease assembleDebug --no-daemon
-      - uses: actions/upload-artifact@v6
+      - name: Prepare signed release APK & verify signature
+        id: meta
+        run: |
+          VERSION_NAME=$(grep -oE 'versionName\s*=\s*"[^"]+"' app/build.gradle.kts | head -n1 | cut -d'"' -f2)
+          if [ -z "$VERSION_NAME" ]; then VERSION_NAME="1.0.0"; fi
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            TAG="$GITHUB_REF_NAME"
+          else
+            TAG="v${VERSION_NAME}"
+          fi
+          RAW_RELEASE_APK=$(find app/build/outputs/apk/release -maxdepth 2 -name "*.apk" | head -n1)
+          if [ -z "$RAW_RELEASE_APK" ] || [ ! -f "$RAW_RELEASE_APK" ]; then
+            echo "ERROR: Release APK not found!" >&2
+            exit 1
+          fi
+          mkdir -p release-out
+          OUT_APK="release-out/VietLauncher-${TAG}-release.apk"
+          cp "$RAW_RELEASE_APK" "$OUT_APK"
+          APKSIGNER=$(find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools" -name apksigner 2>/dev/null | sort -V | tail -n1 || true)
+          if [ -n "$APKSIGNER" ]; then
+            "$APKSIGNER" verify --print-certs "$OUT_APK"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "apk_path=$OUT_APK" >> "$GITHUB_OUTPUT"
+      - name: Upload Release APK Artifact (zip)
+        uses: actions/upload-artifact@v6
         with:
           name: VietLauncher-release-apk
-          path: app/build/outputs/apk/release/*.apk
-      - uses: actions/upload-artifact@v6
+          path: ${{ steps.meta.outputs.apk_path }}
+      - name: Upload Debug APK Artifact (zip)
+        uses: actions/upload-artifact@v6
         with:
           name: VietLauncher-debug-apk
           path: app/build/outputs/apk/debug/*.apk
+      - name: Publish Release APK to GitHub Releases
+        if: github.event_name == 'workflow_dispatch' || github.ref_type == 'tag' || github.ref_name == github.event.repository.default_branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          APK_PATH: ${{ steps.meta.outputs.apk_path }}
+        run: |
+          NOTES="VietLauncher ${TAG} - Bản APK Release (đã ký bằng keystore cố định)."
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$APK_PATH" --clobber
+            gh release edit "$TAG" --title "VietLauncher $TAG" --notes "$NOTES" --latest
+          else
+            gh release create "$TAG" "$APK_PATH" \
+              --title "VietLauncher $TAG" \
+              --notes "$NOTES" \
+              --target "$GITHUB_SHA" \
+              --latest
+          fi

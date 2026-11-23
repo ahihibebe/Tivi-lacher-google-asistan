@@ -458,7 +458,7 @@ private fun ProfileHeaderRow(
             modifier = Modifier
                 .size(56.dp)
                 .clip(CircleShape)
-                .background(Color(0xFF060F2E))
+                .background(Color(0xFF122334))
                 .border(1.5.dp, Color(0x4DFFFFFF), CircleShape),
             contentAlignment = Alignment.Center
         ) {

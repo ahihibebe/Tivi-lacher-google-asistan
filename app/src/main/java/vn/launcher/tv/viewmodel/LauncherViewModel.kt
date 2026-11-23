@@ -614,9 +614,9 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                 )
                 val msg = when {
                     ld == 1 -> tr("Hôm nay mùng 1 âm lịch", "Today is the 1st of the lunar month")
-                    ld == 14 -> tr("Hôm nay 14 âm lịch – mai là Rằm", "Lunar 14th today – full moon tomorrow")
+                    ld == 14 -> tr("Nay 14, Mai là Rằm", "Lunar 14th today – full moon tomorrow")
                     ld == 15 -> tr("Hôm nay Rằm (15 âm lịch)", "Today is the full moon (lunar 15th)")
-                    next[0] == 1 -> tr("Hôm nay là ngày cuối tháng âm lịch ($ld)", "Last day of the lunar month ($ld)")
+                    next[0] == 1 -> tr("Nay $ld, Mai Mùng Một", "Last day of the lunar month ($ld)")
                     else -> null
                 }
                 msg?.let { "● $it" }

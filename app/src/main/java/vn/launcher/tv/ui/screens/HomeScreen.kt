@@ -40,7 +40,6 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SettingsEthernet
 import androidx.compose.material.icons.filled.Usb
@@ -323,7 +322,7 @@ fun HomeScreen(
                                         add(
                                             MiniCardSpec(
                                                 dotColor = if (showingSensor) Color(0xFF30D158) else Color(0xFF38BDF8),
-                                                label = if (en) "TEMP·HUM" else "NHIỆT·ẨM",
+                                                label = if (en) "SENSOR" else "CẢM BIẾN",
                                                 badge = "",
                                                 mainValue = tempText,
                                                 subValue = humText,
@@ -332,7 +331,8 @@ fun HomeScreen(
                                                     displayTemp != null -> (displayTemp.toFloat() / 45f).coerceIn(0.12f, 1f)
                                                     else -> 0.12f
                                                 },
-                                                sourceIcon = if (showingSensor) Icons.Filled.Sensors else Icons.Filled.Cloud,
+                                                blinkDot = showingSensor,
+                                                sourceIcon = if (showingSensor) null else Icons.Filled.Cloud,
                                                 sourceIconTint = when {
                                                     noSensorInSensorMode -> Color(0xFFFF9F0A)
                                                     showingSensor -> Color(0xFF30D158)

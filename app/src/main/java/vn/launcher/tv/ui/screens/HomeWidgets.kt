@@ -3,7 +3,12 @@ package vn.launcher.tv.ui.screens
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.drawable.Drawable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -233,6 +238,7 @@ internal data class MiniCardSpec(
     val subValue: String,
     val progress: Float,
     val expanded: Boolean = false,
+    val blinkDot: Boolean = false,
     val sourceIcon: ImageVector? = null,
     val sourceIconTint: Color = Color(0xFF30D158),
     val sourceContentDescription: String? = null,
@@ -264,10 +270,25 @@ internal fun MiniStatCard(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = if (spec.expanded) Modifier.fillMaxWidth() else Modifier
             ) {
+                val dotAlpha = if (spec.blinkDot) {
+                    val infiniteTransition = rememberInfiniteTransition(label = "sensor_dot_blink")
+                    infiniteTransition.animateFloat(
+                        initialValue = 1f,
+                        targetValue = 0.15f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(durationMillis = 700, easing = FastOutSlowInEasing),
+                            repeatMode = RepeatMode.Reverse
+                        ),
+                        label = "sensor_dot_alpha"
+                    ).value
+                } else {
+                    1f
+                }
                 Box(
                     modifier = Modifier
                         .size(if (spec.expanded) 5.5.dp else 5.dp)
-                        .clip(RoundedCornerShape(2.dp))
+                        .alpha(dotAlpha)
+                        .clip(if (spec.blinkDot) CircleShape else RoundedCornerShape(2.dp))
                         .background(spec.dotColor)
                 )
                 Spacer(Modifier.width(if (spec.expanded) 4.dp else 3.5.dp))
