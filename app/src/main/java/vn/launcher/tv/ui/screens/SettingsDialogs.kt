@@ -32,6 +32,7 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Image
@@ -44,7 +45,6 @@ import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.SettingsRemote
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
@@ -231,14 +231,14 @@ private fun SettingsMainDialog(state: LauncherUiState, vm: LauncherViewModel) {
                 }
             )
             QuickTile(
-                icon = Icons.Filled.PowerSettingsNew,
-                color = Color(0xFFFF453A),
-                title = if (en) "Turn off" else "Tắt TV",
-                subtitle = if (en) "Power off TV" else "Tắt hẳn TV",
+                icon = Icons.Filled.Bedtime,
+                color = Color(0xFF5E5CE6),
+                title = if (en) "Standby" else "Chế độ chờ",
+                subtitle = if (en) "Sleep TV" else "Đưa TV về chờ",
                 theme = state.theme,
                 modifier = Modifier.weight(1f),
                 onFocused = vm::playMove,
-                onClick = { vm.openDialog(ActiveDialog.ConfirmPowerOff) }
+                onClick = { vm.openDialog(ActiveDialog.ConfirmStandby) }
             )
         }
 

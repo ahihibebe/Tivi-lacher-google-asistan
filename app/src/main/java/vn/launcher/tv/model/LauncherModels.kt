@@ -257,7 +257,7 @@ sealed interface ActiveDialog {
     data class AdbHelp(val title: String, val intro: String, val command: String) : ActiveDialog
     data object HiddenAppsMenu : ActiveDialog
     data object MusicPanel : ActiveDialog
-    data object ConfirmPowerOff : ActiveDialog
+    data object ConfirmStandby : ActiveDialog
     data class TileActions(val app: AppItem) : ActiveDialog
     data class SpeechPopup(val title: String, val message: String) : ActiveDialog
     data class CrashReport(val trace: String) : ActiveDialog

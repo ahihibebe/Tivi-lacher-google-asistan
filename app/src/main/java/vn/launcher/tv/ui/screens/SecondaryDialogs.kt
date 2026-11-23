@@ -713,16 +713,16 @@ fun SecondaryDialogHost(
             onDismiss = vm::closeDialog
         )
 
-        ActiveDialog.ConfirmPowerOff -> {
+        ActiveDialog.ConfirmStandby -> {
             MacWindowDialog(
-                title = if (en) "Turn off the TV?" else "Tắt TV?",
+                title = if (en) "Enter standby mode?" else "Bật chế độ chờ?",
                 theme = state.theme,
                 maxWidth = 500.dp,
                 onDismiss = vm::closeDialog
             ) {
                 Text(
-                    text = if (en) "The TV will shut down completely (not standby). Local ADB must be enabled."
-                    else "TV sẽ tắt nguồn hoàn toàn (không ở chế độ chờ). Cần bật ADB nội bộ.",
+                    text = if (en) "The TV will switch to standby (sleep) mode. Local ADB must be enabled."
+                    else "TV sẽ chuyển sang chế độ chờ (tạm nghỉ màn hình). Cần bật ADB nội bộ.",
                     color = Color(0xE6FFFFFF),
                     fontSize = 14.sp,
                     modifier = Modifier.padding(8.dp)
@@ -731,7 +731,7 @@ fun SecondaryDialogHost(
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     MacActionButton(if (en) "Cancel" else "Hủy", Color(0x33FFFFFF), onClick = vm::closeDialog)
                     Spacer(Modifier.width(10.dp))
-                    MacActionButton(if (en) "Turn off" else "Tắt TV", Color(0xFFFF453A), onClick = vm::powerOff)
+                    MacActionButton(if (en) "Standby" else "Chế độ chờ", Color(0xFF5E5CE6), onClick = vm::enterStandby)
                 }
             }
         }

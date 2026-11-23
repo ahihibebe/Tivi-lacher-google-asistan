@@ -1615,27 +1615,32 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         _events.tryEmit(LauncherEvent.LaunchIntent(Intent(Settings.ACTION_SETTINGS)))
     }
 
-    fun powerOff() {
+    fun enterStandby() {
         closeDialog()
-        toast(tr("Đang tắt nguồn TV…", "Shutting down TV…"))
-        val shutdownCmd = "try_am(){ OUT=\$(am start -a \"\$1\" --ez android.intent.extra.KEY_CONFIRM false --ez android.intent.extra.USER_REQUESTED_SHUTDOWN true 2>&1); if echo \"\$OUT\" | grep -qi -e error -e exception -e unable -e denied -e denial -e permitted -e fail; then return 1; fi; echo \"\$OUT\"; return 0; }; " +
-            "try_am com.android.internal.intent.action.REQUEST_SHUTDOWN || " +
-            "try_am android.intent.action.ACTION_REQUEST_SHUTDOWN || " +
-            "reboot -p 2>/dev/null || " +
-            "(setprop sys.powerctl shutdown 2>/dev/null && [ \"\$(getprop sys.powerctl)\" = \"shutdown\" ]) || " +
-            "su -c \"reboot -p\" 2>/dev/null || " +
-            "input keyevent --longpress 26 || " +
-            "echo \"ERR:shutdown_failed\""
-        adbRun(shutdownCmd) { out, err ->
+        toast(tr("Đang chuyển sang chế độ chờ…", "Entering standby mode…"))
+        val standbyCmd = "WAS_AWAKE=0; " +
+            "if dumpsys power 2>/dev/null | grep -qE \"mWakefulness=Awake|Display Power: state=ON\"; then WAS_AWAKE=1; fi; " +
+            "input keyevent 223 2>/dev/null || true; " +
+            "if [ \"\$WAS_AWAKE\" -eq 1 ]; then " +
+            "  sleep 0.4; " +
+            "  if dumpsys power 2>/dev/null | grep -qE \"mWakefulness=Awake|Display Power: state=ON\"; then " +
+            "    input keyevent 26 2>/dev/null || true; " +
+            "  fi; " +
+            "fi; " +
+            "sleep 0.3; " +
+            "if dumpsys power 2>/dev/null | grep -qE \"mWakefulness=Awake|Display Power: state=ON\"; then " +
+            "  am start -n com.android.systemui/.Somnambulator 2>/dev/null || echo \"ERR:standby_failed\"; " +
+            "fi"
+        adbRun(standbyCmd) { out, err ->
             if (err != null) {
                 val msgLower = err.lowercase()
-                // Ignore connection drop caused by the TV actually powering off mid-command
-                val poweredOffMidStream = msgLower.contains("eof") || msgLower.contains("broken pipe") || msgLower.contains("reset")
-                if (!poweredOffMidStream) {
+                // Ignore connection drop caused by the TV entering sleep mid-command
+                val sleptMidStream = msgLower.contains("eof") || msgLower.contains("broken pipe") || msgLower.contains("reset")
+                if (!sleptMidStream) {
                     val en = _uiState.value.isEnglish
                     openDialog(
                         ActiveDialog.AdbHelp(
-                            title = if (en) "Enable local ADB to turn off TV" else "Bật ADB nội bộ để tắt TV",
+                            title = if (en) "Enable local ADB for standby" else "Bật ADB nội bộ để vào chế độ chờ",
                             intro = if (en) {
                                 "Could not connect to the TV's local ADB ($err).\n\n" +
                                     "1. Enable Developer options → USB debugging & Network debugging on the TV.\n" +
@@ -1649,8 +1654,8 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                         )
                     )
                 }
-            } else if (out?.contains("ERR:shutdown_failed") == true) {
-                toast(tr("TV chặn lệnh tắt nguồn qua ADB", "TV blocked shutdown via ADB"))
+            } else if (out?.contains("ERR:standby_failed") == true) {
+                toast(tr("TV chặn lệnh chuyển chế độ chờ qua ADB", "TV blocked standby command via ADB"))
             }
         }
     }
